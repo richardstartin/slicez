@@ -2,6 +2,83 @@
 
 Z-layout bit-sliced index for evaluating point and range queries over unsorted numerical data.
 
+## Usage
+
+### Building an index
+
+For a known array of values:
+
+```java
+SliceZ index = SliceZ.build(1L, 42L, 1000L, 65536L, Long.MAX_VALUE);
+```
+
+For streaming ingestion (e.g. reading from a file or result set), use the `Appender`:
+
+```java
+SliceZ.Appender appender = SliceZ.appender();
+for (long value : values) {
+    appender.add(value);
+}
+// appender also implements LongConsumer, so:
+// LongStream.of(values).forEach(appender);
+SliceZ index = appender.build();
+```
+
+### Querying
+
+Every query method comes in two forms: an iterator that returns matching row indices, and a count method.
+
+```java
+// equality
+PrimitiveIterator.OfInt it = index.equal(42L);
+int count = index.countEqual(42L);
+
+// range (exclusive upper bound)
+it = index.lessThan(1000L);
+count = index.countLessThan(1000L);
+
+it = index.lessThanOrEqual(1000L);
+count = index.countLessThanOrEqual(1000L);
+
+it = index.greaterThan(42L);
+count = index.countGreaterThan(42L);
+
+it = index.greaterThanOrEqual(42L);
+count = index.countGreaterThanOrEqual(42L);
+
+// between(lower, upper) is exclusive on both ends: lower < value < upper
+it = index.between(42L, 1000L);
+count = index.countBetween(42L, 1000L);
+```
+
+All comparisons use **unsigned** 64-bit order, so values are treated as unsigned longs regardless of sign.
+
+### Floating-point values
+
+`double` values can be indexed by mapping them to a total unsigned order:
+
+```java
+// Map doubles to longs that sort in the same order (NaN/±Inf handled)
+long ordinal(double v) {
+    if (v == Double.NEGATIVE_INFINITY) return 0L;
+    if (v == Double.POSITIVE_INFINITY || Double.isNaN(v)) return 0xFFFFFFFFFFFFFFFFL;
+    long bits = Double.doubleToLongBits(v);
+    return (bits & Long.MIN_VALUE) == Long.MIN_VALUE
+            ? (bits == Long.MIN_VALUE ? Long.MIN_VALUE : ~bits)
+            : bits ^ Long.MIN_VALUE;
+}
+
+SliceZ.Appender appender = SliceZ.appender();
+for (double v : doubles) appender.add(ordinal(v));
+SliceZ index = appender.build();
+
+// Query by mapping the threshold the same way
+double threshold = 3.14;
+PrimitiveIterator.OfInt it = index.lessThanOrEqual(ordinal(threshold));
+```
+
+---
+
 ## Implementation
 
 ### Overview
