@@ -1,6 +1,5 @@
 package io.github.richardstartin.slicez;
 
-import io.github.richardstartin.slicez.SliceZ;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
@@ -43,7 +42,9 @@ class TestSliceZ {
         return Arrays.copyOf(buf, n);
     }
 
-    /** Returns consecutive row indices [from, to). */
+    /**
+     * Returns consecutive row indices [from, to).
+     */
     private static int[] range(int from, int to) {
         return IntStream.range(from, to).toArray();
     }
@@ -52,9 +53,12 @@ class TestSliceZ {
         int[] out = new int[a.length + b.length];
         int i = 0, j = 0, k = 0;
         while (i < a.length && j < b.length) {
-            if      (a[i] < b[j]) out[k++] = a[i++];
+            if (a[i] < b[j]) out[k++] = a[i++];
             else if (a[i] > b[j]) out[k++] = b[j++];
-            else                  { out[k++] = a[i++]; j++; }
+            else {
+                out[k++] = a[i++];
+                j++;
+            }
         }
         while (i < a.length) out[k++] = a[i++];
         while (j < b.length) out[k++] = b[j++];
@@ -65,9 +69,12 @@ class TestSliceZ {
         int[] out = new int[Math.min(a.length, b.length)];
         int i = 0, j = 0, k = 0;
         while (i < a.length && j < b.length) {
-            if      (a[i] < b[j]) i++;
+            if (a[i] < b[j]) i++;
             else if (a[i] > b[j]) j++;
-            else                  { out[k++] = a[i++]; j++; }
+            else {
+                out[k++] = a[i++];
+                j++;
+            }
         }
         return Arrays.copyOf(out, k);
     }
@@ -113,37 +120,43 @@ class TestSliceZ {
         assertThrows(IllegalArgumentException.class, () -> new SliceZ(ByteBuffer.allocate(100)));
     }
 
-    @Test void lessThan() {
+    @Test
+    void lessThan() {
         var idx = build(0, 1, 2, 3, 4);
         assertArrayEquals(new int[]{0, 1, 2}, collect(idx.lessThan(3)));
         assertEquals(3, idx.countLessThan(3));
     }
 
-    @Test void lessThanOrEqual() {
+    @Test
+    void lessThanOrEqual() {
         var idx = build(0, 1, 2, 3, 4);
         assertArrayEquals(new int[]{0, 1, 2, 3}, collect(idx.lessThanOrEqual(3)));
         assertEquals(4, idx.countLessThanOrEqual(3));
     }
 
-    @Test void equal() {
+    @Test
+    void equal() {
         var idx = build(0, 1, 2, 3, 4);
         assertArrayEquals(new int[]{2}, collect(idx.equal(2)));
         assertEquals(1, idx.countEqual(3));
     }
 
-    @Test void greaterThan() {
+    @Test
+    void greaterThan() {
         var idx = build(0, 1, 2, 3, 4);
         assertArrayEquals(new int[]{3, 4}, collect(idx.greaterThan(2)));
         assertEquals(2, idx.countGreaterThan(2));
     }
 
-    @Test void greaterThanOrEqual() {
+    @Test
+    void greaterThanOrEqual() {
         var idx = build(0, 1, 2, 3, 4);
         assertArrayEquals(new int[]{2, 3, 4}, collect(idx.greaterThanOrEqual(2)));
         assertEquals(3, idx.countGreaterThanOrEqual(2));
     }
 
-    @Test void between() {
+    @Test
+    void between() {
         var idx = build(0, 1, 2, 3, 4);
         assertArrayEquals(new int[]{1, 2, 3}, collect(idx.between(1, 4)));
         assertEquals(3, idx.countBetween(1, 4));
@@ -153,43 +166,49 @@ class TestSliceZ {
     // Unsigned semantics at the 32-bit boundary
     // -------------------------------------------------------------------------
 
-    private static final long MAX_U32    = 0xFFFFFFFFL;
-    private static final long MID_U32    = 0x80000000L;
+    private static final long MAX_U32 = 0xFFFFFFFFL;
+    private static final long MID_U32 = 0x80000000L;
     private static final long SIGNED_MAX = Integer.MAX_VALUE;
 
     private static final long[] U32_BOUNDARY = {0L, 1L, SIGNED_MAX, MID_U32, MAX_U32};
 
-    @Test void unsignedLt_belowMidpoint() {
+    @Test
+    void unsignedLt_belowMidpoint() {
         var idx = build(U32_BOUNDARY);
         assertArrayEquals(new int[]{0, 1, 2}, collect(idx.lessThan(MID_U32)));
         assertEquals(3, idx.countLessThan(MID_U32));
     }
 
-    @Test void unsignedGt_aboveSignedMax() {
+    @Test
+    void unsignedGt_aboveSignedMax() {
         var idx = build(U32_BOUNDARY);
         assertArrayEquals(new int[]{3, 4}, collect(idx.greaterThan(SIGNED_MAX)));
         assertEquals(2, idx.countGreaterThan(SIGNED_MAX));
     }
 
-    @Test void unsignedEqual_maxU32() {
+    @Test
+    void unsignedEqual_maxU32() {
         var idx = build(U32_BOUNDARY);
         assertArrayEquals(new int[]{4}, collect(idx.equal(MAX_U32)));
         assertEquals(1, idx.countEqual(MAX_U32));
     }
 
-    @Test void unsignedBetween_straddlingSignedBoundary() {
+    @Test
+    void unsignedBetween_straddlingSignedBoundary() {
         var idx = build(U32_BOUNDARY);
         assertArrayEquals(new int[]{2, 3}, collect(idx.between(SIGNED_MAX, MAX_U32)));
         assertEquals(2, idx.countBetween(SIGNED_MAX, MAX_U32));
     }
 
-    @Test void unsignedGte_zero_returnsAll() {
+    @Test
+    void unsignedGte_zero_returnsAll() {
         var idx = build(U32_BOUNDARY);
         assertArrayEquals(new int[]{0, 1, 2, 3, 4}, collect(idx.greaterThanOrEqual(0L)));
         assertEquals(5, idx.countGreaterThanOrEqual(0L));
     }
 
-    @Test void unsignedLte_maxU32_returnsAll() {
+    @Test
+    void unsignedLte_maxU32_returnsAll() {
         var idx = build(U32_BOUNDARY);
         assertArrayEquals(new int[]{0, 1, 2, 3, 4}, collect(idx.lessThanOrEqual(MAX_U32)));
         assertEquals(5, idx.countLessThanOrEqual(MAX_U32));
@@ -199,19 +218,22 @@ class TestSliceZ {
     // Edge cases
     // -------------------------------------------------------------------------
 
-    @Test void ltZeroIsEmpty() {
+    @Test
+    void ltZeroIsEmpty() {
         var idx = build(0, 1, 2);
         assertArrayEquals(new int[]{}, collect(idx.lessThan(0L)));
         assertEquals(0, idx.countLessThan(0L));
     }
 
-    @Test void gtMaxU32IsEmpty() {
+    @Test
+    void gtMaxU32IsEmpty() {
         var idx = build(0, 1, MAX_U32);
         assertArrayEquals(new int[]{}, collect(idx.greaterThan(MAX_U32)));
         assertEquals(0, idx.countGreaterThan(MAX_U32));
     }
 
-    @Test void emptyIndex() {
+    @Test
+    void emptyIndex() {
         var idx = build();
         assertArrayEquals(new int[]{}, collect(idx.lessThan(5L)));
         assertEquals(0, idx.countLessThan(5L));
@@ -223,57 +245,63 @@ class TestSliceZ {
         assertEquals(0, idx.countBetween(0L, 10L));
     }
 
-    @Test void duplicateValues() {
+    @Test
+    void duplicateValues() {
         var idx = build(3, 3, 3, 1, 2);
         assertArrayEquals(new int[]{0, 1, 2}, collect(idx.equal(3L)));
         assertEquals(3, idx.countEqual(3L));
-        assertArrayEquals(new int[]{3, 4},   collect(idx.lessThan(3L)));
+        assertArrayEquals(new int[]{3, 4}, collect(idx.lessThan(3L)));
         assertEquals(2, idx.countLessThan(3L));
-        assertArrayEquals(new int[]{},        collect(idx.greaterThan(3L)));
-        assertEquals(0,        idx.countGreaterThan(3L));
+        assertArrayEquals(new int[]{}, collect(idx.greaterThan(3L)));
+        assertEquals(0, idx.countGreaterThan(3L));
     }
 
-    @Test void betweenEmptyWhenLowerEqualsUpper() {
+    @Test
+    void betweenEmptyWhenLowerEqualsUpper() {
         var idx = build(0, 1, 2, 3, 4);
         assertArrayEquals(new int[]{}, collect(idx.between(2L, 2L)));
         assertEquals(0, idx.countBetween(2L, 2L));
     }
 
-    @Test void betweenEmptyWhenLowerExceedsUpper() {
+    @Test
+    void betweenEmptyWhenLowerExceedsUpper() {
         var idx = build(0, 1, 2, 3, 4);
         assertArrayEquals(new int[]{}, collect(idx.between(3L, 1L)));
         assertEquals(0, idx.countBetween(3L, 1L));
     }
 
-    @Test void singleElement() {
+    @Test
+    void singleElement() {
         var idx = build(42L);
-        assertArrayEquals(new int[]{0},  collect(idx.equal(42L)));
-        assertEquals(1,  idx.countEqual(42L));
-        assertArrayEquals(new int[]{},   collect(idx.lessThan(42L)));
-        assertEquals(0,   idx.countLessThan(42L));
-        assertArrayEquals(new int[]{},   collect(idx.greaterThan(42L)));
-        assertEquals(0,   idx.countGreaterThan(42L));
-        assertArrayEquals(new int[]{0},  collect(idx.between(42L, 43L)));
-        assertEquals(1,   idx.countBetween(42L, 43L));
-        assertArrayEquals(new int[]{},   collect(idx.between(41L, 42L)));
-        assertEquals(0,   idx.countBetween(41L, 42L));
+        assertArrayEquals(new int[]{0}, collect(idx.equal(42L)));
+        assertEquals(1, idx.countEqual(42L));
+        assertArrayEquals(new int[]{}, collect(idx.lessThan(42L)));
+        assertEquals(0, idx.countLessThan(42L));
+        assertArrayEquals(new int[]{}, collect(idx.greaterThan(42L)));
+        assertEquals(0, idx.countGreaterThan(42L));
+        assertArrayEquals(new int[]{0}, collect(idx.between(42L, 43L)));
+        assertEquals(1, idx.countBetween(42L, 43L));
+        assertArrayEquals(new int[]{}, collect(idx.between(41L, 42L)));
+        assertEquals(0, idx.countBetween(41L, 42L));
     }
 
-    @Test void allZeroValues() {
+    @Test
+    void allZeroValues() {
         var idx = build(0, 0, 0);
         assertArrayEquals(new int[]{0, 1, 2}, collect(idx.equal(0L)));
         assertEquals(3, idx.countEqual(0L));
-        assertArrayEquals(new int[]{},         collect(idx.lessThan(0L)));
-        assertEquals(0,         idx.countLessThan(0L));
-        assertArrayEquals(new int[]{0, 1, 2},  collect(idx.lessThanOrEqual(0L)));
-        assertEquals(3,  idx.countLessThanOrEqual(0L));
+        assertArrayEquals(new int[]{}, collect(idx.lessThan(0L)));
+        assertEquals(0, idx.countLessThan(0L));
+        assertArrayEquals(new int[]{0, 1, 2}, collect(idx.lessThanOrEqual(0L)));
+        assertEquals(3, idx.countLessThanOrEqual(0L));
     }
 
     // -------------------------------------------------------------------------
     // Cross-check against RangeBitmapLongIndex over multiple blocks
     // -------------------------------------------------------------------------
 
-    @Test void crossCheckMultipleBlocks() {
+    @Test
+    void crossCheckMultipleBlocks() {
         long[] values = new long[10000];
         for (int i = 0; i < values.length; i++) values[i] = i * 7L;
         var rba = RangeBitmap.appender(-1L);
@@ -282,9 +310,9 @@ class TestSliceZ {
         var idx = build(values);
         long lower = 500L, upper = 3000L;
         assertArrayEquals(ref.between(lower, upper).toArray(), collect(idx.between(lower, upper)));
-        assertArrayEquals(ref.lt(1000L).toArray(),       collect(idx.lessThan(1000L)));
-        assertArrayEquals(ref.gt(5000L).toArray(),    collect(idx.greaterThan(5000L)));
-        assertArrayEquals(ref.eq(777L).toArray(),           collect(idx.equal(777L)));
+        assertArrayEquals(ref.lt(1000L).toArray(), collect(idx.lessThan(1000L)));
+        assertArrayEquals(ref.gt(5000L).toArray(), collect(idx.greaterThan(5000L)));
+        assertArrayEquals(ref.eq(777L).toArray(), collect(idx.equal(777L)));
     }
 
     // =========================================================================
@@ -301,18 +329,18 @@ class TestSliceZ {
         for (long upper = 1; upper < size; upper *= 10) {
             assertArrayEquals(range(0, (int) upper + 1), collect(idx.lessThanOrEqual(upper)));
             assertEquals((int) upper + 1, idx.countLessThanOrEqual(upper));
-            assertArrayEquals(range(0, (int) upper),     collect(idx.lessThan(upper)));
-            assertEquals(upper,     idx.countLessThan(upper));
-            assertArrayEquals(new int[]{(int) upper},    collect(idx.equal(upper)));
-            assertEquals(1,    idx.countEqual(upper));
+            assertArrayEquals(range(0, (int) upper), collect(idx.lessThan(upper)));
+            assertEquals(upper, idx.countLessThan(upper));
+            assertArrayEquals(new int[]{(int) upper}, collect(idx.equal(upper)));
+            assertEquals(1, idx.countEqual(upper));
         }
         for (long lower = 1; lower < size; lower *= 10) {
-            assertArrayEquals(range((int) lower, size),      collect(idx.greaterThanOrEqual(lower)));
-            assertEquals(size - lower,      idx.countGreaterThanOrEqual(lower));
-            assertArrayEquals(range((int) lower + 1, size),  collect(idx.greaterThan(lower)));
-            assertEquals(size - lower - 1,      idx.countGreaterThan(lower));
-            assertArrayEquals(new int[]{(int) lower},        collect(idx.equal(lower)));
-            assertEquals(1,        idx.countEqual(lower));
+            assertArrayEquals(range((int) lower, size), collect(idx.greaterThanOrEqual(lower)));
+            assertEquals(size - lower, idx.countGreaterThanOrEqual(lower));
+            assertArrayEquals(range((int) lower + 1, size), collect(idx.greaterThan(lower)));
+            assertEquals(size - lower - 1, idx.countGreaterThan(lower));
+            assertArrayEquals(new int[]{(int) lower}, collect(idx.equal(lower)));
+            assertEquals(1, idx.countEqual(lower));
         }
     }
 
@@ -325,27 +353,27 @@ class TestSliceZ {
         SliceZ idx = appender.build();
         for (long upper = 1; upper < size; upper *= 10) {
             // value <= upper at rows where size-i <= upper, i.e. i >= size-upper
-            assertArrayEquals(range(size - (int) upper, size),     collect(idx.lessThanOrEqual(upper)), upper + "," + size);
-            assertEquals((int) upper,     idx.countLessThanOrEqual(upper));
+            assertArrayEquals(range(size - (int) upper, size), collect(idx.lessThanOrEqual(upper)), upper + "," + size);
+            assertEquals((int) upper, idx.countLessThanOrEqual(upper));
             assertArrayEquals(range(size - (int) upper + 1, size), collect(idx.lessThan(upper)));
-            assertEquals((int) upper - 1,     idx.countLessThan(upper));
+            assertEquals((int) upper - 1, idx.countLessThan(upper));
         }
         for (long lower = 1; lower < size; lower *= 10) {
             // value >= lower at rows where size-i >= lower, i.e. i <= size-lower
             assertArrayEquals(range(0, size - (int) lower + 1), collect(idx.greaterThanOrEqual(lower)));
-            assertEquals(size - (int) lower + 1,     idx.countGreaterThanOrEqual(lower));
-            assertArrayEquals(range(0, size - (int) lower),     collect(idx.greaterThan(lower)), size + "/" + lower);
-            assertEquals(size - (int) lower,     idx.countGreaterThan(lower));
+            assertEquals(size - (int) lower + 1, idx.countGreaterThanOrEqual(lower));
+            assertArrayEquals(range(0, size - (int) lower), collect(idx.greaterThan(lower)), size + "/" + lower);
+            assertEquals(size - (int) lower, idx.countGreaterThan(lower));
         }
     }
 
     @Test
     public void testSparseOrNot() {
-        long[] bitmap = new long[] { -1L, 0, 0xF0F0F0F0F0F0F0F0L, 0x0F0F0F0F0F0F0F0FL};
-        char[] values = new char[] {(char)32, (char)96, (char)160, (char)204, (char) 216, (char) 218};
+        long[] bitmap = new long[]{-1L, 0, 0xF0F0F0F0F0F0F0F0L, 0x0F0F0F0F0F0F0F0FL};
+        char[] values = new char[]{(char) 32, (char) 96, (char) 160, (char) 204, (char) 216, (char) 218};
         long[] asBitmap = new long[bitmap.length];
         ByteBuffer buffer = ByteBuffer.allocate(Character.BYTES * (values.length + 1));
-        buffer.putChar((char)values.length);
+        buffer.putChar((char) values.length);
         for (char value : values) {
             buffer.putChar(value);
             asBitmap[value >>> 6] |= (1L << value);
@@ -441,40 +469,40 @@ class TestSliceZ {
     void testExtremeValues() {
         // unsigned ordering: 0 < Long.MIN_VALUE (0x8000...0) < -1L (0xFFFF...F)
         SliceZ idx = build(0L, Long.MIN_VALUE, -1L);
-        assertArrayEquals(new int[]{},        collect(idx.greaterThan(-1L)));
-        assertEquals(0,        idx.countGreaterThan(-1L));
-        assertArrayEquals(new int[]{2},        collect(idx.greaterThanOrEqual(-1L)));
-        assertEquals(1,        idx.countGreaterThanOrEqual(-1L));
-        assertArrayEquals(new int[]{0, 1, 2},  collect(idx.lessThanOrEqual(-1L)));
-        assertEquals(3,  idx.countLessThanOrEqual(-1L));
-        assertArrayEquals(new int[]{0, 1},     collect(idx.lessThanOrEqual(-2L)));
-        assertEquals(2,     idx.countLessThanOrEqual(-2L));
-        assertArrayEquals(new int[]{0, 1},     collect(idx.lessThan(-1L)));
-        assertEquals(2,     idx.countLessThan(-1L));
-        assertArrayEquals(new int[]{0, 1},     collect(idx.lessThanOrEqual(Long.MIN_VALUE)));
-        assertEquals(2,     idx.countLessThanOrEqual(Long.MIN_VALUE));
-        assertArrayEquals(new int[]{0},        collect(idx.lessThan(Long.MIN_VALUE)));
-        assertEquals(1,        idx.countLessThan(Long.MIN_VALUE));
-        assertArrayEquals(new int[]{2},        collect(idx.greaterThan(Long.MIN_VALUE)));
-        assertEquals(1,        idx.countGreaterThan(Long.MIN_VALUE));
-        assertArrayEquals(new int[]{1, 2},     collect(idx.greaterThanOrEqual(Long.MIN_VALUE)));
-        assertEquals(2,     idx.countGreaterThanOrEqual(Long.MIN_VALUE));
-        assertArrayEquals(new int[]{0},        collect(idx.lessThanOrEqual(0)));
-        assertEquals(1,        idx.countLessThanOrEqual(0));
-        assertArrayEquals(new int[]{},         collect(idx.lessThan(0)));
-        assertEquals(0,         idx.countLessThan(0));
-        assertArrayEquals(new int[]{0, 1, 2},  collect(idx.greaterThanOrEqual(0)));
-        assertEquals(3,  idx.countGreaterThanOrEqual(0));
-        assertArrayEquals(new int[]{1, 2},     collect(idx.greaterThan(0)));
-        assertEquals(2,     idx.countGreaterThan(0));
-        assertArrayEquals(new int[]{},         collect(idx.equal(2L)));
-        assertEquals(0,         idx.countEqual(2L));
-        assertArrayEquals(new int[]{0},        collect(idx.equal(0L)));
-        assertEquals(1,        idx.countEqual(0L));
-        assertArrayEquals(new int[]{1},        collect(idx.equal(Long.MIN_VALUE)));
-        assertEquals(1,        idx.countEqual(Long.MIN_VALUE));
-        assertArrayEquals(new int[]{2},        collect(idx.equal(-1L)));
-        assertEquals(1,        idx.countEqual(-1L));
+        assertArrayEquals(new int[]{}, collect(idx.greaterThan(-1L)));
+        assertEquals(0, idx.countGreaterThan(-1L));
+        assertArrayEquals(new int[]{2}, collect(idx.greaterThanOrEqual(-1L)));
+        assertEquals(1, idx.countGreaterThanOrEqual(-1L));
+        assertArrayEquals(new int[]{0, 1, 2}, collect(idx.lessThanOrEqual(-1L)));
+        assertEquals(3, idx.countLessThanOrEqual(-1L));
+        assertArrayEquals(new int[]{0, 1}, collect(idx.lessThanOrEqual(-2L)));
+        assertEquals(2, idx.countLessThanOrEqual(-2L));
+        assertArrayEquals(new int[]{0, 1}, collect(idx.lessThan(-1L)));
+        assertEquals(2, idx.countLessThan(-1L));
+        assertArrayEquals(new int[]{0, 1}, collect(idx.lessThanOrEqual(Long.MIN_VALUE)));
+        assertEquals(2, idx.countLessThanOrEqual(Long.MIN_VALUE));
+        assertArrayEquals(new int[]{0}, collect(idx.lessThan(Long.MIN_VALUE)));
+        assertEquals(1, idx.countLessThan(Long.MIN_VALUE));
+        assertArrayEquals(new int[]{2}, collect(idx.greaterThan(Long.MIN_VALUE)));
+        assertEquals(1, idx.countGreaterThan(Long.MIN_VALUE));
+        assertArrayEquals(new int[]{1, 2}, collect(idx.greaterThanOrEqual(Long.MIN_VALUE)));
+        assertEquals(2, idx.countGreaterThanOrEqual(Long.MIN_VALUE));
+        assertArrayEquals(new int[]{0}, collect(idx.lessThanOrEqual(0)));
+        assertEquals(1, idx.countLessThanOrEqual(0));
+        assertArrayEquals(new int[]{}, collect(idx.lessThan(0)));
+        assertEquals(0, idx.countLessThan(0));
+        assertArrayEquals(new int[]{0, 1, 2}, collect(idx.greaterThanOrEqual(0)));
+        assertEquals(3, idx.countGreaterThanOrEqual(0));
+        assertArrayEquals(new int[]{1, 2}, collect(idx.greaterThan(0)));
+        assertEquals(2, idx.countGreaterThan(0));
+        assertArrayEquals(new int[]{}, collect(idx.equal(2L)));
+        assertEquals(0, idx.countEqual(2L));
+        assertArrayEquals(new int[]{0}, collect(idx.equal(0L)));
+        assertEquals(1, idx.countEqual(0L));
+        assertArrayEquals(new int[]{1}, collect(idx.equal(Long.MIN_VALUE)));
+        assertEquals(1, idx.countEqual(Long.MIN_VALUE));
+        assertArrayEquals(new int[]{2}, collect(idx.equal(-1L)));
+        assertEquals(1, idx.countEqual(-1L));
     }
 
     @ParameterizedTest
@@ -610,7 +638,6 @@ class TestSliceZ {
     }
 
 
-
     public static Stream<Arguments> distributions() {
         return Stream.of(
                 Distribution.NORMAL.of(42, 1_000, 100),
@@ -622,13 +649,15 @@ class TestSliceZ {
                 Distribution.EXP.of(42, 0.9999),
                 Distribution.POINT.of(0, 0),
                 Distribution.POINT.of(0, 1),
-                Distribution.POINT.of(0, Long.MAX_VALUE)
+                Distribution.POINT.of(0, Long.MAX_VALUE),
+                Distribution.SAMPLED_PCS.of(0, 256)
         ).map(Arguments::of);
     }
 
     enum Distribution {
         UNIFORM {
-            @Override LongSupplier of(long seed, double... params) {
+            @Override
+            LongSupplier of(long seed, double... params) {
                 long min = (long) params[0];
                 long max = (long) params[1];
                 SplittableRandom random = new SplittableRandom(seed);
@@ -636,23 +665,62 @@ class TestSliceZ {
             }
         },
         NORMAL {
-            @Override LongSupplier of(long seed, double... params) {
-                double mean   = params[0];
+            @Override
+            LongSupplier of(long seed, double... params) {
+                double mean = params[0];
                 double stddev = params[1];
                 Random random = new Random(seed);
                 return () -> (long) (stddev * random.nextGaussian() + mean);
             }
         },
         EXP {
-            @Override LongSupplier of(long seed, double... params) {
+            @Override
+            LongSupplier of(long seed, double... params) {
                 double rate = params[0];
                 SplittableRandom random = new SplittableRandom(seed);
                 return () -> (long) -(Math.log(random.nextDouble()) / rate);
             }
         },
         POINT {
-            @Override LongSupplier of(long seed, double... params) {
+            @Override
+            LongSupplier of(long seed, double... params) {
                 return () -> (long) params[0];
+            }
+        },
+        SAMPLED_PCS {
+            @Override
+            LongSupplier of(long seed, double... params) {
+                var random = new SplittableRandom(seed);
+                // Typical JIT code region base on Linux x86-64: upper 17 bits = 0
+                long base = 0x00007f1234560000L;
+                int numFunctions = (int) params[0];
+                long[] funcBase = new long[numFunctions];
+                long[] funcSize = new long[numFunctions];
+                double[] cumWeight = new double[numFunctions];
+
+                // Lay out functions with Zipfian sizes: function k has size 64 << (k % 11)
+                // giving a mix of 64B .. 64KB ranges; Zipfian weight 1/(k+1) for sampling.
+                long offset = 0;
+                double totalWeight = 0;
+                for (int k = 0; k < numFunctions; k++) {
+                    funcSize[k] = 64L << (k % 11);
+                    funcBase[k] = base + offset;
+                    offset += funcSize[k] + 64; // 64-byte alignment gap
+                    totalWeight += 1.0 / (k + 1);
+                    cumWeight[k] = totalWeight;
+                }
+                for (int k = 0; k < numFunctions; k++) {
+                    cumWeight[k] /= totalWeight;
+                }
+
+                return () -> {
+                    // Inverse-CDF sample: pick function proportional to 1/(k+1)
+                    double r = random.nextDouble();
+                    int k = Arrays.binarySearch(cumWeight, r);
+                    if (k < 0) k = -k - 1;
+                    if (k >= numFunctions) k = numFunctions - 1;
+                    return funcBase[k] + random.nextLong(funcSize[k]);
+                };
             }
         };
 
