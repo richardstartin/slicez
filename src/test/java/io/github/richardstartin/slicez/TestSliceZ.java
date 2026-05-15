@@ -142,6 +142,92 @@ class TestSliceZ {
     }
 
     @Test
+    void notEqual() {
+        var idx = build(0, 1, 2, 3, 4);
+        assertArrayEquals(new int[]{0, 1, 3, 4}, collect(idx.notEqual(2)));
+        assertEquals(4, idx.countNotEqual(2));
+    }
+
+    @Test
+    void notEqualAbsentValue() {
+        var idx = build(0, 1, 2, 3, 4);
+        assertArrayEquals(range(0, 5), collect(idx.notEqual(99)));
+        assertEquals(5, idx.countNotEqual(99));
+    }
+
+    @Test
+    void notEqualIsComplementOfEqual() {
+        var idx = build(0, 1, 2, 3, 4);
+        for (long v = 0; v < 5; v++) {
+            int[] eq    = collect(idx.equal(v));
+            int[] neq   = collect(idx.notEqual(v));
+            assertArrayEquals(range(0, 5), union(eq, neq), "union at v=" + v);
+            assertArrayEquals(new int[]{},  intersect(eq, neq), "intersection at v=" + v);
+            assertEquals(5, idx.countEqual(v) + idx.countNotEqual(v));
+        }
+    }
+
+    @Test
+    void notEqualAllSameValues() {
+        var idx = build(7, 7, 7);
+        assertArrayEquals(new int[]{}, collect(idx.notEqual(7)));
+        assertEquals(0, idx.countNotEqual(7));
+        assertArrayEquals(range(0, 3), collect(idx.notEqual(0)));
+        assertEquals(3, idx.countNotEqual(0));
+    }
+
+    @Test
+    void notEqualSingleElement() {
+        var idx = build(42L);
+        assertArrayEquals(new int[]{},  collect(idx.notEqual(42L)));
+        assertEquals(0, idx.countNotEqual(42L));
+        assertArrayEquals(new int[]{0}, collect(idx.notEqual(99L)));
+        assertEquals(1, idx.countNotEqual(99L));
+    }
+
+    @Test
+    void notEqualEmptyIndex() {
+        var idx = build();
+        assertArrayEquals(new int[]{}, collect(idx.notEqual(0L)));
+        assertEquals(0, idx.countNotEqual(0L));
+    }
+
+    @Test
+    void notEqualDuplicates() {
+        var idx = build(3, 3, 3, 1, 2);
+        assertArrayEquals(new int[]{3, 4}, collect(idx.notEqual(3L)));
+        assertEquals(2, idx.countNotEqual(3L));
+        assertArrayEquals(new int[]{0, 1, 2, 4}, collect(idx.notEqual(1L)));
+        assertEquals(4, idx.countNotEqual(1L));
+    }
+
+    @Test
+    void notEqualUnsignedExtremes() {
+        var idx = build(0L, Long.MIN_VALUE, -1L);
+        assertArrayEquals(new int[]{1, 2}, collect(idx.notEqual(0L)));
+        assertEquals(2, idx.countNotEqual(0L));
+        assertArrayEquals(new int[]{0, 2}, collect(idx.notEqual(Long.MIN_VALUE)));
+        assertEquals(2, idx.countNotEqual(Long.MIN_VALUE));
+        assertArrayEquals(new int[]{0, 1}, collect(idx.notEqual(-1L)));
+        assertEquals(2, idx.countNotEqual(-1L));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0xFFFF, 0x10001, 100_000, 0x110001})
+    void notEqualMultiBlock(int size) {
+        SliceZ.Appender appender = SliceZ.appender();
+        LongStream.range(0, size).forEach(appender::add);
+        SliceZ idx = appender.build();
+        for (long v : new long[]{0, 1, size / 2, size - 1}) {
+            int[] eq  = collect(idx.equal(v));
+            int[] neq = collect(idx.notEqual(v));
+            assertArrayEquals(range(0, size), union(eq, neq), "union at v=" + v);
+            assertArrayEquals(new int[]{},     intersect(eq, neq), "intersection at v=" + v);
+            assertEquals(size, idx.countEqual(v) + idx.countNotEqual(v));
+        }
+    }
+
+    @Test
     void greaterThan() {
         var idx = build(0, 1, 2, 3, 4);
         assertArrayEquals(new int[]{3, 4}, collect(idx.greaterThan(2)));

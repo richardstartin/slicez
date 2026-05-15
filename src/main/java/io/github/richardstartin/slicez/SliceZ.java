@@ -336,8 +336,16 @@ public class SliceZ {
         return new EqualityQuery(value, false);
     }
 
+    public PrimitiveIterator.OfInt notEqual(long value) {
+        return new EqualityQuery(value, true);
+    }
+
     public int countEqual(long value) {
         return new EqualityQuery(value, false).matchingCount();
+    }
+
+    public int countNotEqual(long value) {
+        return new EqualityQuery(value, true).matchingCount();
     }
 
 
