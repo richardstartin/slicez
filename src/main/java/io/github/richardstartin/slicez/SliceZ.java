@@ -228,6 +228,17 @@ public class SliceZ {
         return appender.build();
     }
 
+    public SliceZ(ByteBuffer data) {
+        this.data = data;
+        int cookie = data.getInt(0);
+        if (cookie != COOKIE) {
+            throw new IllegalArgumentException("cookie should be " + Integer.toHexString(COOKIE) + " but found " + Integer.toHexString(cookie));
+        }
+        this.rowCount = data.getInt(4);
+        this.min = data.getLong(8);
+        this.max = data.getLong(16);
+    }
+
     public int getSparseInvertedSliceCount() {
         return getCount(SPARSE_INVERTED);
     }
@@ -258,17 +269,6 @@ public class SliceZ {
 
     private int getCount(int offset) {
         return data.getInt(24 + offset * Integer.BYTES);
-    }
-
-    public SliceZ(ByteBuffer data) {
-        this.data = data;
-        int cookie = data.getInt(0);
-        if (cookie != COOKIE) {
-            throw new IllegalArgumentException("cookie should be " + Integer.toHexString(COOKIE) + " but found " + Integer.toHexString(cookie));
-        }
-        this.rowCount = data.getInt(4);
-        this.min = data.getLong(8);
-        this.max = data.getLong(16);
     }
 
 
