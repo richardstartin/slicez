@@ -889,11 +889,11 @@ public class SliceZ {
                     temp.reset();
                     long anchoredValue = value - blockMin;
                     position = evaluateBlockForEquality(position, typesHigh, typesLow, anchoredValue, data, false, temp, range);
-                    if (position < 0) {
-                        position = blockStart;
-                    }
                 }
                 buffer.or(temp);
+            }
+            if (position < 0) {
+                position = blockStart;
             }
             if (position == blockStart) {
                 skipBlock(typesHigh, typesLow);
