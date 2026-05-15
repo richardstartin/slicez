@@ -794,6 +794,121 @@ class TestSliceZ {
     }
 
 
+    // -------------------------------------------------------------------------
+    // in()
+    // -------------------------------------------------------------------------
+
+    @Test
+    void inEmptyValuesArray() {
+        var idx = build(0, 1, 2, 3, 4);
+        assertArrayEquals(new int[]{}, collect(idx.in()));
+    }
+
+    @Test
+    void inSingleValueMatchesSingleEqual() {
+        var idx = build(0, 1, 2, 3, 4);
+        assertArrayEquals(collect(idx.equal(2)), collect(idx.in(2)));
+        assertArrayEquals(collect(idx.equal(99)), collect(idx.in(99)));
+    }
+
+    @Test
+    void inTwoValuesBothPresent() {
+        var idx = build(0, 1, 2, 3, 4);
+        int[] expected = union(collect(idx.equal(1)), collect(idx.equal(3)));
+        assertArrayEquals(expected, collect(idx.in(1, 3)));
+    }
+
+    @Test
+    void inTwoValuesOneAbsent() {
+        var idx = build(0, 1, 2, 3, 4);
+        int[] expected = collect(idx.equal(2));
+        assertArrayEquals(expected, collect(idx.in(2, 99)));
+        assertArrayEquals(expected, collect(idx.in(99, 2)));
+    }
+
+    @Test
+    void inAllValuesAbsent() {
+        var idx = build(0, 1, 2, 3, 4);
+        assertArrayEquals(new int[]{}, collect(idx.in(10, 20, 30)));
+    }
+
+    @Test
+    void inOrderIndependence() {
+        var idx = build(0, 1, 2, 3, 4);
+        assertArrayEquals(collect(idx.in(1, 3)), collect(idx.in(3, 1)));
+        assertArrayEquals(collect(idx.in(0, 2, 4)), collect(idx.in(4, 2, 0)));
+    }
+
+    @Test
+    void inDuplicateQueryValues() {
+        var idx = build(0, 1, 2, 3, 4);
+        assertArrayEquals(collect(idx.equal(2)), collect(idx.in(2, 2)));
+    }
+
+    @Test
+    void inWithDuplicateIndexedValues() {
+        var idx = build(3, 3, 3, 1, 2);
+        int[] expected = union(collect(idx.equal(3)), collect(idx.equal(1)));
+        assertArrayEquals(expected, collect(idx.in(3, 1)));
+    }
+
+    @Test
+    void inUnsignedExtremes() {
+        var idx = build(0L, Long.MIN_VALUE, -1L);
+        // unsigned order: 0 < Long.MIN_VALUE < -1L
+        assertArrayEquals(new int[]{0, 1}, collect(idx.in(0L, Long.MIN_VALUE)));
+        assertArrayEquals(new int[]{0, 2}, collect(idx.in(0L, -1L)));
+        assertArrayEquals(new int[]{1, 2}, collect(idx.in(Long.MIN_VALUE, -1L)));
+        assertArrayEquals(new int[]{0, 1, 2}, collect(idx.in(0L, Long.MIN_VALUE, -1L)));
+    }
+
+    @Test
+    void inEmptyIndex() {
+        var idx = build();
+        assertArrayEquals(new int[]{}, collect(idx.in(0L, 1L)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0xFFFF, 0x10001, 100_000, 0x110001})
+    void inMultiBlockCrossCheck(int size) {
+        SliceZ.Appender appender = SliceZ.appender();
+        LongStream.range(0, size).forEach(appender::add);
+        SliceZ idx = appender.build();
+        long v1 = 42L;
+        long v2 = (long) (size / 2);
+        long v3 = size - 1L;
+        int[] expected = union(union(collect(idx.equal(v1)), collect(idx.equal(v2))), collect(idx.equal(v3)));
+        assertArrayEquals(expected, collect(idx.in(v1, v2, v3)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0x10001, 100_000})
+    void inMultiBlockOrderIndependence(int size) {
+        SliceZ.Appender appender = SliceZ.appender();
+        LongStream.range(0, size).forEach(appender::add);
+        SliceZ idx = appender.build();
+        long v1 = 42L;                   // block 0
+        long v2 = (long) BLOCK_SIZE + 1; // block 1
+        int[] expected = union(collect(idx.equal(v1)), collect(idx.equal(v2)));
+        assertArrayEquals(expected, collect(idx.in(v1, v2)), "in(block0, block1)");
+        assertArrayEquals(expected, collect(idx.in(v2, v1)), "in(block1, block0)");
+    }
+
+    @ParameterizedTest
+    @MethodSource("distributions")
+    void inCrossCheckAgainstUnionOfEquals(LongSupplier dist) {
+        int total = 10_000;
+        long[] data = LongStream.range(0, total).map(i -> dist.getAsLong()).toArray();
+        var appender = SliceZ.appender();
+        for (long v : data) appender.add(v);
+        SliceZ idx = appender.build();
+        long[] query = {data[0], data[total / 4], data[total / 2], data[total - 1]};
+        int[] expected = Arrays.stream(query)
+                .mapToObj(q -> collect(idx.equal(q)))
+                .reduce(new int[0], TestSliceZ::union);
+        assertArrayEquals(expected, collect(idx.in(query)));
+    }
+
     public static Stream<Arguments> distributions() {
         return Stream.of(
                 Distribution.NORMAL.of(42, 1_000, 100),
