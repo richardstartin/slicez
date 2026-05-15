@@ -112,6 +112,76 @@ class TestSliceZ {
     }
 
     // -------------------------------------------------------------------------
+    // min() / max()
+    // -------------------------------------------------------------------------
+
+    @Test
+    void minMaxBasic() {
+        var idx = build(3, 1, 4, 1, 5, 9, 2, 6);
+        assertEquals(1L, idx.min());
+        assertEquals(9L, idx.max());
+    }
+
+    @Test
+    void minMaxSingleElement() {
+        var idx = build(42L);
+        assertEquals(42L, idx.min());
+        assertEquals(42L, idx.max());
+    }
+
+    @Test
+    void minMaxAllSame() {
+        var idx = build(7, 7, 7);
+        assertEquals(7L, idx.min());
+        assertEquals(7L, idx.max());
+    }
+
+    @Test
+    void minMaxUnsignedOrdering() {
+        // unsigned order: 0 < Long.MAX_VALUE < Long.MIN_VALUE < -1L
+        var idx = build(0L, Long.MAX_VALUE, Long.MIN_VALUE, -1L);
+        assertEquals(0L, idx.min());
+        assertEquals(-1L, idx.max());
+    }
+
+    @Test
+    void minMaxUnsignedExtremes() {
+        var idx = build(0L, -1L);
+        assertEquals(0L, idx.min());
+        assertEquals(-1L, idx.max());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0xFFFF, 0x10001, 100_000, 0x110001})
+    void minMaxMultiBlock(int size) {
+        SliceZ.Appender appender = SliceZ.appender();
+        LongStream.range(0, size).forEach(appender::add);
+        SliceZ idx = appender.build();
+        assertEquals(0L, idx.min());
+        assertEquals(size - 1L, idx.max());
+    }
+
+    @Test
+    void minMaxConsistentWithQueryBounds() {
+        var idx = build(3, 1, 4, 1, 5, 9, 2, 6);
+        int n = 8;
+        assertEquals(0, idx.countLessThan(idx.min()));
+        assertEquals(0, idx.countGreaterThan(idx.max()));
+        assertEquals(n, idx.countGreaterThanOrEqual(idx.min()));
+        assertEquals(n, idx.countLessThanOrEqual(idx.max()));
+    }
+
+    @Test
+    void minMaxEmptyIndexSentinels() {
+        // empty index exposes the internal unsigned sentinels: min=-1L (unsigned max),
+        // max=0L — callers can detect empty by checking Long.compareUnsigned(min, max) > 0
+        var idx = build();
+        assertEquals(-1L, idx.min());
+        assertEquals(0L, idx.max());
+        assertTrue(Long.compareUnsigned(idx.min(), idx.max()) > 0);
+    }
+
+    // -------------------------------------------------------------------------
     // Basic operations
     // -------------------------------------------------------------------------
 

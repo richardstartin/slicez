@@ -372,6 +372,14 @@ public class SliceZ {
         return new BetweenQuery(lower - 1, upper - 1).matchingCount();
     }
 
+    public long max() {
+        return max;
+    }
+
+    public long min() {
+        return min;
+    }
+
     private static class Bits {
 
         private final long[] bits;
