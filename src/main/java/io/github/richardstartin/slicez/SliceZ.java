@@ -340,6 +340,16 @@ public class SliceZ {
         return new EqualityQuery(value, true);
     }
 
+    public PrimitiveIterator.OfInt in(long... values) {
+        if (values.length == 0) {
+            return IntStream.empty().iterator();
+        }
+        if (values.length == 1) {
+            return equal(values[0]);
+        }
+        return new InQuery(values);
+    }
+
     public int countEqual(long value) {
         return new EqualityQuery(value, false).matchingCount();
     }
@@ -563,6 +573,24 @@ public class SliceZ {
                     for (int i = 0; i < bits.length; i++) {
                         bits[i] = ~bits[i] & other.bits[i];
                     }
+                }
+            }
+        }
+
+        public void or(Bits other) {
+            if (!full && !other.empty) {
+                if (other.full) {
+                  Arrays.fill(bits, -1L);
+                  full = true;
+                  empty = false;
+                } else if (empty) {
+                    System.arraycopy(other.bits, 0, bits, 0, bits.length);
+                    empty = false;
+                } else {
+                    for (int i = 0; i < bits.length; i++) {
+                        bits[i] |= other.bits[i];
+                    }
+                    empty = false;
                 }
             }
         }
@@ -814,39 +842,12 @@ public class SliceZ {
                 return;
             }
             long anchoredThreshold = threshold - blockMin;
-            // bitset becomes empty whenever bit i is present and slice i is full, or bit i is absent and slice i is empty
-            // if the bitset does become empty, it can't be populated again, so the evaluation can be skipped for the entire block
-            int emptySlice = firstRelevantSlice(anchoredThreshold, typesHigh, typesLow);
-            if (emptySlice == 0) {
-                long storedSlices = ~(typesHigh & typesLow);
-                buffer.fill(range);
-                while (storedSlices != 0) {
-                    int slice = Long.numberOfTrailingZeros(storedSlices);
-                    storedSlices &= (storedSlices - 1);
-                    int type = ((int) ((typesHigh >>> slice) & 1) << 1) | (int) ((typesLow >>> slice) & 1);
-                    if (((anchoredThreshold >>> slice) & 1) == 1) {
-                        // bit present, need to remove the container values from bits (bits &= ~mask)
-                        switch (type) {
-                            case SPARSE_INVERTED -> position = buffer.sparseAnd(position, data, range);
-                            case SPARSE -> position = buffer.sparseAndNot(position, data, range);
-                            case DENSE -> position = buffer.denseAndNot(position, data);
-                            case FULL -> buffer.clear(range);
-                        }
-                    } else {
-                        // bit not present, need to intersect the container bits (bits &= mask)
-                        switch (type) {
-                            case SPARSE_INVERTED -> position = buffer.sparseAndNot(position, data, range);
-                            case SPARSE -> position = buffer.sparseAnd(position, data, range);
-                            case DENSE -> position = buffer.denseAnd(position, data);
-                            case FULL -> {
-                            } // nothing to do
-                        }
-                    }
-                }
-                if (negate) {
-                    buffer.flip(range);
-                }
-            } else {
+            int snapshot = position;
+            // FIXME this is a horrible error prone contract and only exists for the sake of reuse and lack of pass by reference
+            position = evaluateBlockForEquality(position, typesHigh, typesLow, anchoredThreshold, data, negate, buffer, range);
+            // check if the block was skipped
+            if (position < 0) {
+                position = snapshot;
                 // we can skip the entire block
                 // this could be calculated from the type masks if sparse slices were removed
                 skipBlock(typesHigh, typesLow);
@@ -855,6 +856,47 @@ public class SliceZ {
                 } else {
                     buffer.clear(range);
                 }
+            }
+        }
+    }
+
+    private final class InQuery extends BaseQuery {
+
+        private final Bits temp = new Bits();
+        private final long[] values;
+
+        InQuery(long... values) {
+            this.values = values;
+        }
+
+        @Override
+        protected void evaluateBlock() {
+            int range = range();
+            long typesHigh = data.getLong(position);
+            position += Long.BYTES;
+            long typesLow = data.getLong(position);
+            position += Long.BYTES;
+            long blockMin = data.getLong(position);
+            position += Long.BYTES;
+            int blockStart = position;
+            buffer.reset();
+            for (long value : values) {
+                position = blockStart;
+                if (Long.compareUnsigned(value, blockMin) < 0) {
+                    skipBlock(typesHigh, typesLow);
+                    temp.clear(range);
+                } else {
+                    temp.reset();
+                    long anchoredValue = value - blockMin;
+                    position = evaluateBlockForEquality(position, typesHigh, typesLow, anchoredValue, data, false, temp, range);
+                    if (position < 0) {
+                        position = blockStart;
+                    }
+                }
+                buffer.or(temp);
+            }
+            if (position == blockStart) {
+                skipBlock(typesHigh, typesLow);
             }
         }
     }
@@ -974,6 +1016,52 @@ public class SliceZ {
             buffer.flipAnd(buffer2);
         }
     }
+
+    private static int evaluateBlockForEquality(int position,
+                                                long typesHigh,
+                                                long typesLow,
+                                                long anchoredThreshold,
+                                                ByteBuffer data,
+                                                boolean negate,
+                                                Bits buffer,
+                                                int range) {
+        // bitset becomes empty whenever bit i is present and slice i is full, or bit i is absent and slice i is empty
+        // if the bitset does become empty, it can't be populated again, so the evaluation can be skipped for the entire block
+        int emptySlice = firstRelevantSlice(anchoredThreshold, typesHigh, typesLow);
+        if (emptySlice == 0) {
+            long storedSlices = ~(typesHigh & typesLow);
+            buffer.fill(range);
+            while (storedSlices != 0) {
+                int slice = Long.numberOfTrailingZeros(storedSlices);
+                storedSlices &= (storedSlices - 1);
+                int type = ((int) ((typesHigh >>> slice) & 1) << 1) | (int) ((typesLow >>> slice) & 1);
+                if (((anchoredThreshold >>> slice) & 1) == 1) {
+                    // bit present, need to remove the container values from bits (bits &= ~mask)
+                    switch (type) {
+                        case SPARSE_INVERTED -> position = buffer.sparseAnd(position, data, range);
+                        case SPARSE -> position = buffer.sparseAndNot(position, data, range);
+                        case DENSE -> position = buffer.denseAndNot(position, data);
+                        case FULL -> buffer.clear(range);
+                    }
+                } else {
+                    // bit not present, need to intersect the container bits (bits &= mask)
+                    switch (type) {
+                        case SPARSE_INVERTED -> position = buffer.sparseAndNot(position, data, range);
+                        case SPARSE -> position = buffer.sparseAnd(position, data, range);
+                        case DENSE -> position = buffer.denseAnd(position, data);
+                        case FULL -> {
+                        } // nothing to do
+                    }
+                }
+            }
+            if (negate) {
+                buffer.flip(range);
+            }
+            return position;
+        }
+        return -1;
+    }
+
 
     private static int skipSlice(int type, ByteBuffer data, int position) {
         return switch (type) {
