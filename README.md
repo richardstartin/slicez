@@ -83,7 +83,7 @@ PrimitiveIterator.OfInt it = index.lessThanOrEqual(ordinal(threshold));
 
 ### Overview
 
-SliceZ answers equality and range queries (`=`, `<`, `≤`, `>`, `≥`, `between`) over sequences of `long` values without sorting the data. It is a bit-sliced index in the tradition of O'Neil and Quass (1997). IEEE 754 doubles can be indexed by first mapping them to a total unsigned order with `FPOrdering.ordinalOf`.
+SliceZ answers equality and range queries (`=`, `<`, `≤`, `>`, `≥`, `between`, `in`) over sequences of `long` values without sorting the data. It is a bit-sliced index in the tradition of O'Neil and Quass (1997). IEEE 754 doubles can be indexed by first mapping them to a total unsigned order with `FPOrdering.ordinalOf`.
 
 ### Data layout
 
@@ -95,7 +95,8 @@ Before bit-slicing, every value in the block is transformed:
 stored = ~(value − blockMin)
 ```
 
-where `blockMin` is the unsigned minimum of the block. The subtraction shifts the range down to start at zero; the bitwise NOT then inverts the ordering so that `blockMin` maps to `0xFFFF…FFFF` and values larger than `blockMin` map to smaller stored values. The practical effect is that all bit positions above the effective value range become all-ones in the stored representation, enabling them to be stored as **FULL slices** with zero payload.
+where `blockMin` is the unsigned minimum of the block. The subtraction shifts the range down to start at zero; the bitwise NOT then inverts the ordering so that `blockMin` maps to `0xFFFF…FFFF` and values larger than `blockMin` map to smaller stored values. 
+The practical effect is that all bit positions above the effective value range become all-ones in the stored representation, enabling them to be stored as **FULL slices** with zero payload.
 
 Each slice is assigned one of four storage types based on its cardinality within the block:
 
@@ -110,7 +111,7 @@ The block header is 24 bytes: two 64-bit words (`typesHigh`, `typesLow`) encodin
 
 ### Query evaluation
 
-Each query maintains a `Bits` accumulator — a 1,024-byte bitset with one bit per row in the block — and iterates its set bits to produce row indices.
+Each query maintains a `Bits` accumulator — a 8192-byte bitset with one bit per row in the block — and iterates its set bits to produce row indices.
 
 **`≤ threshold` (and by inversion `> threshold`):** Anchors the threshold: `anchoredThreshold = threshold − blockMin`. Then traverses slices from bit 0 (LSB) to bit 63 (MSB):
 - Threshold bit = 1 → union the slice into the accumulator (`buffer |= slice`)
