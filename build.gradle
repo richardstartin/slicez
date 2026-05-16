@@ -23,3 +23,9 @@ dependencies {
 test {
     useJUnitPlatform()
 }
+
+jmh {
+    if (project.hasProperty('jmhInclude')) {
+        includes = [project.property('jmhInclude')]
+    }
+}

@@ -4,7 +4,6 @@ import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 import org.roaringbitmap.RoaringBitmap;
 
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.PrimitiveIterator;
 import java.util.concurrent.TimeUnit;
@@ -20,11 +19,21 @@ public class InQueryBenchmark {
     public static class BaseState {
         @Param({"100000000"})
         int size;
-        @Param({"UNIFORM_1", "UNIFORM_2", "EXP_0_1", "DOUBLES", "SAMPLED_PCS"})
+        @Param({"UNIFORM_2", "EXP_0_1", "SAMPLED_PCS"})
         DataGenerator data;
+        @Param({"4", "100"})
+        int inClauseSize;
 
         public long[] generateValues() {
             return data.generate(size);
+        }
+
+        public long[] sampleQueryValues(long[] values) {
+            long[] queryValues = new long[inClauseSize];
+            for (int i = 0; i < inClauseSize; i++) {
+                queryValues[i] = values[i * (size / inClauseSize)];
+            }
+            return queryValues;
         }
     }
 
@@ -37,12 +46,7 @@ public class InQueryBenchmark {
         @Setup(Level.Trial)
         public void setup() {
             long[] values = generateValues();
-            queryValues = new long[]{
-                    values[0],
-                    values[size / 4],
-                    values[size / 2],
-                    values[3 * size / 4]
-            };
+            queryValues = sampleQueryValues(values);
             index = new HashMap<>();
             for (int i = 0; i < values.length; i++) {
                 index.computeIfAbsent(values[i], k -> new RoaringBitmap()).add(i);
@@ -59,12 +63,7 @@ public class InQueryBenchmark {
         @Setup(Level.Trial)
         public void setup() {
             long[] values = generateValues();
-            queryValues = new long[]{
-                    values[0],
-                    values[size / 4],
-                    values[size / 2],
-                    values[3 * size / 4]
-            };
+            queryValues = sampleQueryValues(values);
             SliceZ.Appender appender = SliceZ.appender();
             for (long value : values) appender.add(value);
             index = appender.build();
