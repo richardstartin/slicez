@@ -574,6 +574,10 @@ public class SliceZ {
                         bits[i] = ~bits[i] & other.bits[i];
                     }
                 }
+            } else {
+                Arrays.fill(bits, 0L);
+                full = false;
+                empty = true;
             }
         }
 
@@ -987,9 +991,12 @@ public class SliceZ {
                 buffer.clear(range);
                 return;
             }
-            long anchoredLower = trivialLowerBound ? 0L : lower - blockMin;
+            long anchoredLower = lower - blockMin;
             long anchoredUpper = upper - blockMin;
-            int lowerStart = firstRelevantSlice(anchoredLower, typesHigh, typesLow);
+            int lowerStart = trivialLowerBound ? Long.SIZE : firstRelevantSlice(anchoredLower, typesHigh, typesLow);
+            if (trivialLowerBound) {
+                buffer.clear(range);
+            }
             int upperStart = firstRelevantSlice(anchoredUpper, typesHigh, typesLow);
             for (int i = 0; i < Long.SIZE; i++) {
                 int type = ((int) (typesHigh & 1) << 1) | (int) (typesLow & 1);
