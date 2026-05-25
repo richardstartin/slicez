@@ -997,4 +997,31 @@ class TestSliceZ {
 
         abstract LongSupplier of(long seed, double... params);
     }
+
+    // -------------------------------------------------------------------------
+    // BetweenQuery / flipAnd regression
+    // -------------------------------------------------------------------------
+
+    @Test
+    void betweenFlipAndBug() {
+        // Block 0: BLOCK_SIZE identical values (5).  Every sv = ~0 = all-ones, so every
+        // bit-slice is FULL.  Block 1: one value (7), also all-FULL (single-row block).
+        //
+        // Global max = 7 >= lower = 6, so the early-exit guard in between() does not fire.
+        //
+        // For block 0 in BetweenQuery(5, 7) [= between(6, 8) after the -1 adjustment]:
+        //   anchoredLower = (lower-1) - blockMin = 5 - 5 = 0.
+        //   Bit 0 of anchoredLower is 0 and slice 0 is FULL, so firstSlice calls fill()
+        //   -> buffer.full = true.  All subsequent AND-FULL steps are no-ops.
+        //   flipAnd short-circuits on !full, leaving the result as full (all BLOCK_SIZE
+        //   rows) rather than computing NOT(full) AND buffer2 = empty.
+        //
+        // Expected: {BLOCK_SIZE}  (only the value-7 row from block 1).
+        // Actual:   {0 .. BLOCK_SIZE}  (all block-0 rows spuriously included).
+        var appender = SliceZ.appender();
+        for (int i = 0; i < SliceZ.BLOCK_SIZE; i++) appender.add(5);
+        appender.add(7);
+        var idx = appender.build();
+        assertArrayEquals(new int[]{SliceZ.BLOCK_SIZE}, collect(idx.between(6, 8)));
+    }
 }
