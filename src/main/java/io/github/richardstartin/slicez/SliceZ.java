@@ -1037,8 +1037,8 @@ public class SliceZ {
                                                 int range) {
         // bitset becomes empty whenever bit i is present and slice i is full, or bit i is absent and slice i is empty
         // if the bitset does become empty, it can't be populated again, so the evaluation can be skipped for the entire block
-        int emptySlice = firstRelevantSlice(anchoredThreshold, typesHigh, typesLow);
-        if (emptySlice == 0) {
+        long fullSlices = typesHigh & typesLow;
+        if ((fullSlices & anchoredThreshold) == 0) {
             long storedSlices = ~(typesHigh & typesLow);
             buffer.fill(range);
             while (storedSlices != 0) {
@@ -1051,7 +1051,10 @@ public class SliceZ {
                         case SPARSE_INVERTED -> position = buffer.sparseAnd(position, data, range);
                         case SPARSE -> position = buffer.sparseAndNot(position, data, range);
                         case DENSE -> position = buffer.denseAndNot(position, data);
-                        case FULL -> buffer.clear(range);
+                        case FULL -> {
+                            assert false: "entire block should have been skipped for full block";
+                            buffer.clear(range);
+                        }
                     }
                 } else {
                     // bit not present, need to intersect the container bits (bits &= mask)
