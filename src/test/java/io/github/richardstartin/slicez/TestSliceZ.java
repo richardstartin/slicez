@@ -1119,6 +1119,25 @@ class TestSliceZ {
     }
 
     @Test
+    void betweenExcludesMaxUnsignedUpperBound() {
+        // between(lower, upper) is exclusive-upper: lower ≤ v < upper.
+        // When upper == -1L (max unsigned value), the code short-circuits to
+        // greaterThanOrEqual(lower), which INCLUDES rows where v == -1L because
+        // v >= lower is satisfied. But -1L is not < -1L, so those rows must be excluded.
+        //
+        // countBetween does not take this shortcut: for lower != 0 it builds
+        // BetweenQuery(lower-1, upper-1) = BetweenQuery(lower-1, -2L), which correctly
+        // excludes v == -1L. The iterator and count are therefore inconsistent.
+        //
+        // build(5, -1L): row 0 = v=5, row 1 = v=-1L (0xFFFF...FFFF, max unsigned).
+        // between(5, -1L) = 5 ≤ v < -1L: only v=5 qualifies.
+        // greaterThanOrEqual(5) returns both rows since -1L >= 5 unsigned.
+        var idx = build(5L, -1L);
+        assertArrayEquals(new int[]{0}, collect(idx.between(5L, -1L)));
+        assertEquals(1, idx.countBetween(5L, -1L));
+    }
+
+    @Test
     void equalityFalsePositiveWhenFullSliceAtBitZeroHasSetThresholdBit() {
         // firstRelevantSlice returns max(0, skipFull-1). When the highest FULL slice with
         // a set threshold bit is at position 0, skipFull=1 and the function returns 0.
