@@ -358,7 +358,6 @@ public class SliceZ {
         return new EqualityQuery(value, true).matchingCount();
     }
 
-
     public PrimitiveIterator.OfInt between(long lower, long upper) {
         if (Long.compareUnsigned(upper, min) < 0 || Long.compareUnsigned(max, lower) < 0) {
             return IntStream.empty().iterator();
@@ -385,6 +384,28 @@ public class SliceZ {
 
     public long min() {
         return min;
+    }
+
+    public PrimitiveIterator.OfInt bottom(int k) {
+        if (k == 0) {
+            return IntStream.empty().iterator();
+        }
+        if (k >= rowCount) {
+            return IntStream.range(0, rowCount).iterator();
+        }
+        for (long candidate = min; Long.compareUnsigned(candidate, max) <= 0; candidate++) {
+            int count = countLessThanOrEqual(candidate);
+            if (count >= k) {
+                var it = lessThanOrEqual(candidate);
+                int[] indexes = new int[k];
+                for (int i = 0; i < k && it.hasNext(); i++) {
+                    indexes[i] = it.nextInt();
+                }
+                Arrays.sort(indexes);
+                return Arrays.stream(indexes).iterator();
+            }
+        }
+        throw new IllegalStateException("unreachable");
     }
 
     private static class Bits {
