@@ -369,9 +369,6 @@ public class SliceZ {
         if (lower == 0L) {
             return lessThan(upper);
         }
-        if (upper == -1L) {
-            return greaterThanOrEqual(lower);
-        }
         return new BetweenQuery(lower - 1, upper - 1);
     }
 
