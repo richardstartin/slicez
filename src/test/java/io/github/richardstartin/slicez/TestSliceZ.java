@@ -1117,4 +1117,25 @@ class TestSliceZ {
         int[] result = collect(idx.between(3, 9));
         assertEquals(BLOCK_SIZE + BLOCK_SIZE / 2, result.length);
     }
+
+    @Test
+    void equalityFalsePositiveWhenFullSliceAtBitZeroHasSetThresholdBit() {
+        // firstRelevantSlice returns max(0, skipFull-1). When the highest FULL slice with
+        // a set threshold bit is at position 0, skipFull=1 and the function returns 0.
+        // evaluateBlockForEquality treats emptySlice==0 as "no optimization, process block",
+        // but this conflates two cases: (a) no FULL slice has a set threshold bit, and
+        // (b) the highest such FULL slice is at bit 0. Case (b) means equality is impossible
+        // for the entire block (sv bit 0 is always 1, but the threshold needs sv bit 0 = 0).
+        // Since FULL slices are excluded from storedSlices, the necessary AND-NOT never runs.
+        //
+        // Values [0, 2]: sv(0)=~0=all-ones, sv(2)=~2=...FFFD.
+        // Slice 0: both sv[0]=1 → FULL. Slice 1: sv(0)[1]=1, sv(2)[1]=0 → SPARSE {row 0}.
+        // equal(1): anchoredThreshold=1=0b01. Bit 0=1, slice 0=FULL.
+        // firstRelevantSlice(1)=max(0,1-1)=0 → block processed, not skipped.
+        // storedSlices={bit 1}. buffer.fill. AND with SPARSE → buffer={row 0 (v=0)}.
+        // Result: {row 0} — false positive; no value in the index equals 1.
+        var idx = build(0, 2);
+        assertArrayEquals(new int[0], collect(idx.equal(1)));
+        assertEquals(0, idx.countEqual(1));
+    }
 }
