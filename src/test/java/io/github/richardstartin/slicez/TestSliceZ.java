@@ -1003,6 +1003,35 @@ class TestSliceZ {
     // -------------------------------------------------------------------------
 
     @Test
+    void countBetweenLowerZeroExcludesUpperBound() {
+        // between(lower, upper) is exclusive-upper: lower ≤ v < upper.
+        // between(0, upper) delegates to lessThan(upper) = v < upper.
+        // countBetween(0, upper) delegates to countLessThanOrEqual(upper) = count(v ≤ upper).
+        // When upper is in the index, countBetween overcounts by the number of rows == upper.
+        var idx = build(0, 1, 2, 3, 4);
+        assertArrayEquals(range(0, 4), collect(idx.between(0, 4)));  // v < 4: {0,1,2,3}
+        assertEquals(4, idx.countBetween(0, 4));  // fails: returns 5
+    }
+
+    @Test
+    void countBetweenLowerZeroDuplicateBoundary() {
+        // Three copies of value=3 at the exclusive upper bound.
+        var idx = build(0, 1, 2, 3, 3, 3);
+        assertArrayEquals(range(0, 3), collect(idx.between(0, 3)));  // v < 3: {0,1,2}
+        assertEquals(3, idx.countBetween(0, 3));  // fails: returns 6
+    }
+
+    @Test
+    void countBetweenLowerZeroMultiBlock() {
+        // Span two blocks so between(0, BLOCK_SIZE) = v in {0..BLOCK_SIZE-1} = BLOCK_SIZE rows.
+        var appender = SliceZ.appender();
+        for (int i = 0; i <= BLOCK_SIZE; i++) appender.add(i);
+        var idx = appender.build();
+        assertEquals(BLOCK_SIZE, collect(idx.between(0, BLOCK_SIZE)).length);
+        assertEquals(BLOCK_SIZE, idx.countBetween(0, BLOCK_SIZE));  // fails: returns BLOCK_SIZE+1
+    }
+
+    @Test
     void betweenFlipAndBug() {
         // Block 0: BLOCK_SIZE identical values (5).  Every sv = ~0 = all-ones, so every
         // bit-slice is FULL.  Block 1: one value (7), also all-FULL (single-row block).
