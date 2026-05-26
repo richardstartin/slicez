@@ -1053,4 +1053,36 @@ class TestSliceZ {
         var idx = appender.build();
         assertArrayEquals(new int[]{SliceZ.BLOCK_SIZE}, collect(idx.between(6, 8)));
     }
+
+    @Test
+    void betweenBuffer2StaleFullAcrossBlocks() {
+        // buffer2 (upper-bound accumulator) is never reset between blocks in BetweenQuery.
+        // When block 0 fills buffer2.full=true and block 1's firstRelevantSlice(anchoredUpper)
+        // returns 0 with a DENSE slice whose first operation is denseOr, the denseOr
+        // short-circuits on buffer2.full=true and skips the real data — leaving buffer2 erroneously
+        // full for the entire block, causing all block-1 rows to be returned even those where
+        // v >= upper.
+        //
+        // Setup:
+        //   Block 0: BLOCK_SIZE rows of value=7.  All sv=~(7-7)=~0=0xffff..., all slices FULL.
+        //            anchoredUpper = 7-7 = 0; firstSlice fills buffer2 → buffer2.full=true.
+        //   Block 1: BLOCK_SIZE/2 rows of value=5, then BLOCK_SIZE/2 rows of value=8.
+        //            blockMin=5. sv(5)=~0=full, sv(8)=~3=0xffff..fc. Slices 0,1 are DENSE.
+        //            anchoredUpper = 7-5 = 2 = 0b10; firstRelevantSlice=0 (no all-FULL prefix).
+        //            bit 0 of anchoredUpper=0, slice 0 is DENSE → firstSlice calls denseOr.
+        //            denseOr is a no-op when buffer2.full=true, so buffer2 stays spuriously full.
+        //            All BLOCK_SIZE block-1 rows are returned; the BLOCK_SIZE/2 rows with v=8
+        //            (outside [3,8)) are false positives.
+        //
+        // between(3, 8) = 3 ≤ v < 8. Matching values: 7 (block 0) and 5 (first half of block 1).
+        // Expected: BLOCK_SIZE + BLOCK_SIZE/2 matches.
+        // Actual (buggy): 2 * BLOCK_SIZE matches.
+        var appender = SliceZ.appender();
+        for (int i = 0; i < BLOCK_SIZE; i++) appender.add(7);
+        for (int i = 0; i < BLOCK_SIZE / 2; i++) appender.add(5);
+        for (int i = 0; i < BLOCK_SIZE / 2; i++) appender.add(8);
+        var idx = appender.build();
+        int[] result = collect(idx.between(3, 8));
+        assertEquals(BLOCK_SIZE + BLOCK_SIZE / 2, result.length);
+    }
 }
