@@ -1085,4 +1085,36 @@ class TestSliceZ {
         int[] result = collect(idx.between(3, 8));
         assertEquals(BLOCK_SIZE + BLOCK_SIZE / 2, result.length);
     }
+
+    @Test
+    void betweenBufferStaleFullAcrossBlocks() {
+        // buffer (lower-bound accumulator) is never reset between blocks in BetweenQuery
+        // when !trivialLowerBound. When block 0's flipAnd leaves buffer.full=true, block 1
+        // with lowerStart=0 calls firstSlice which dispatches to denseOr. denseOr
+        // short-circuits on buffer.full=true (the `if (!full)` guard), so the real block-1
+        // data is never loaded and the stale full state persists. Then flipAnd(buffer2)
+        // sees buffer.full=true → else branch → clears buffer → zero matches from block 1.
+        //
+        // Setup:
+        //   Block 0: BLOCK_SIZE rows of value=5. All-FULL slices. blockMin=5.
+        //            trivialLowerBound=true (lower=2 < 5) → buffer.clear → empty.
+        //            buffer2 fills to full (anchoredUpper=8-5=3 hits FULL slices).
+        //            flipAnd: empty AND full → buffer.full=true.
+        //   Block 1: BLOCK_SIZE/2 rows of value=0, BLOCK_SIZE/2 of value=3. blockMin=0.
+        //            trivialLowerBound=false (lower=2 >= 0). lowerStart=0 (anchoredLower=2,
+        //            but bit-1 slice is DENSE not FULL). buffer.full=true (stale).
+        //            firstSlice(DENSE, bit0=0) → denseOr → no-op → buffer stays full.
+        //            flipAnd clears buffer → 0 matches instead of BLOCK_SIZE/2 for v=3.
+        //
+        // between(3, 9) = 3 ≤ v < 9. v=5 (block 0) and v=3 (block 1 second half) match.
+        // Expected: BLOCK_SIZE + BLOCK_SIZE/2 matches.
+        // Actual (buggy): BLOCK_SIZE + 0 matches.
+        var appender = SliceZ.appender();
+        for (int i = 0; i < BLOCK_SIZE; i++) appender.add(5);
+        for (int i = 0; i < BLOCK_SIZE / 2; i++) appender.add(0);
+        for (int i = 0; i < BLOCK_SIZE / 2; i++) appender.add(3);
+        var idx = appender.build();
+        int[] result = collect(idx.between(3, 9));
+        assertEquals(BLOCK_SIZE + BLOCK_SIZE / 2, result.length);
+    }
 }
