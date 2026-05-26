@@ -996,6 +996,8 @@ public class SliceZ {
             int lowerStart = trivialLowerBound ? Long.SIZE : firstRelevantSlice(anchoredLower, typesHigh, typesLow);
             if (trivialLowerBound) {
                 buffer.clear(range);
+            } else {
+                buffer.reset();
             }
             buffer2.reset();
             int upperStart = firstRelevantSlice(anchoredUpper, typesHigh, typesLow);
