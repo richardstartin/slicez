@@ -377,7 +377,7 @@ public class SliceZ {
 
     public int countBetween(long lower, long upper) {
         if (lower == 0L) {
-            return countLessThanOrEqual(upper);
+            return countLessThan(upper);
         }
         return new BetweenQuery(lower - 1, upper - 1).matchingCount();
     }
