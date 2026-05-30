@@ -18,7 +18,7 @@ public class SliceZ {
 	private static final int SPARSE_SIZE = 5;
 	private static final int NUM_COUNTS = SPARSE_SIZE + 1;
 	private static final int COOKIE = 0xfeef1f0;
-	private static final int BLOCK_HEADER_SIZE = Long.BYTES * 3; // typesHigh + typesLow + blockMin
+	private static final int BLOCK_HEADER_SIZE = Long.BYTES * 4; // typesHigh + typesLow + blockMin + blockMax
 	static final int HEADER_SIZE = Integer.BYTES // cookie
 			+ Integer.BYTES // count
 			+ Long.BYTES // min
@@ -36,12 +36,14 @@ public class SliceZ {
 		private ByteBuffer output = ByteBuffer.allocate(1 << 10).position(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN);
 		private int rid;
 		private long blockMin = -1L;
+		private long blockMax = 0L;
 		private long min = -1L;
 		private long max = 0L;
 		private final int[] counts = new int[NUM_COUNTS];
 
 		public void add(long value) {
 			blockMin = unsignedMin(value, blockMin);
+			blockMax = unsignedMax(value, blockMax);
 			min = unsignedMin(value, min);
 			max = unsignedMax(value, max);
 			final int ridLow = rid & (BLOCK_SIZE - 1);
@@ -53,7 +55,7 @@ public class SliceZ {
 		}
 
 		public void flush(int blockLimit) {
-			// subtract blockMin to reduce the number of populated slices, figure out
+			// subtract delimiter to reduce the number of populated slices, figure out
 			// required slice types
 			// this also conflates empty and full slices, allowing for more non-trivial
 			// storage types with
@@ -151,6 +153,8 @@ public class SliceZ {
 			headerPos += Long.BYTES;
 			output.putLong(headerPos, blockMin);
 			headerPos += Long.BYTES;
+			output.putLong(headerPos, blockMax);
+			headerPos += Long.BYTES;
 
 			reset();
 			counts[BLOCK_COUNT]++;
@@ -159,6 +163,7 @@ public class SliceZ {
 		private void reset() {
 			Arrays.fill(sliceCardinalities, 0);
 			blockMin = -1L;
+			blockMax = 0L;
 		}
 
 		private void ensureCapacity(int needed) {
@@ -390,16 +395,26 @@ public class SliceZ {
 		if (k == 0) {
 			return IntStream.empty().iterator();
 		}
-		return new BottomKQuery(k);
+		return new KTailQuery(k, true);
 	}
 
-	private class BottomKQuery implements PrimitiveIterator.OfInt {
+	public PrimitiveIterator.OfInt top(int k) {
+		if (k < 0) {
+			throw new IllegalArgumentException("top-k negative k: " + k);
+		}
+		if (k == 0) {
+			return IntStream.empty().iterator();
+		}
+		return new KTailQuery(k, false);
+	}
 
-		private record Block(long blockMin, int offset, int base) implements Comparable<Block> {
+	private class KTailQuery implements PrimitiveIterator.OfInt {
+
+		private record Block(long delimiter, long min, int offset, int base) implements Comparable<Block> {
 
 			@Override
 			public int compareTo(Block o) {
-				return Long.compareUnsigned(blockMin, o.blockMin);
+				return Long.compareUnsigned(delimiter, o.delimiter);
 			}
 		}
 
@@ -411,12 +426,14 @@ public class SliceZ {
 			}
 		}
 
+		private final boolean bottom;
 		private final Row[] rows;
 		private final int resultCount;
 
 		private int it;
 
-		private BottomKQuery(int k) {
+		private KTailQuery(int k, boolean bottom) {
+			this.bottom = bottom;
 			var blockHeap = findCandidateBlocks(k);
 			var resultsHeap = findRows(blockHeap, k, new Bits());
 			this.resultCount = resultsHeap.size();
@@ -424,7 +441,7 @@ public class SliceZ {
 		}
 
 		private Heap<Block> findCandidateBlocks(int k) {
-			var blockHeap = new Heap<>(Block.class, Comparator.naturalOrder(), k);
+			var blockHeap = new Heap<>(Block.class, bottom ? Comparator.naturalOrder() : Comparator.reverseOrder(), k);
 			int position = HEADER_SIZE;
 			int base = 0;
 			while (base < rowCount) {
@@ -435,31 +452,67 @@ public class SliceZ {
 				position += Long.BYTES;
 				long blockMin = data.getLong(position);
 				position += Long.BYTES;
+				long blockMax = data.getLong(position);
+				position += Long.BYTES;
 				position = Util.skipBlock(data, position, typesHigh, typesLow);
-				blockHeap.add(new Block(blockMin, blockOffset, base));
+				blockHeap.add(new Block(bottom ? blockMin : blockMax, blockMin, blockOffset, base));
 				base += BLOCK_SIZE;
 			}
 			return blockHeap;
 		}
 
 		private Heap<Row> findRows(Heap<Block> blockHeap, int k, Bits buffer) {
+			return bottom ? findBottomRows(blockHeap, k, buffer) : findTopRows(blockHeap, k, buffer);
+		}
+
+		private Heap<Row> findTopRows(Heap<Block> blockHeap, int k, Bits buffer) {
+			var resultHeap = new Heap<>(Row.class, Comparator.reverseOrder(), k);
+			int blockCount = blockHeap.size();
+			if (blockCount != 0) {
+				Block[] blocks = blockHeap.backingArray();
+				Arrays.sort(blocks, 0, blockCount, Comparator.reverseOrder());
+				long threshold = blockCount < k ? 0L : blocks[blockCount - 1].delimiter;
+				for (int i = 0; i < blockCount; i++) {
+					var block = blocks[i];
+					if (resultHeap.size() == k && Long.compareUnsigned(block.delimiter, threshold) <= 0) {
+						break;
+					}
+					int range = Math.min(rowCount - block.base, BLOCK_SIZE);
+					if (threshold == 0L) {
+						buffer.fill(range);
+					} else {
+						evaluateSingleBoundQueryBlock(data, block.offset, range, buffer, threshold - 1, bottom);
+					}
+					extractValuesToHeap(data, block, buffer, resultHeap, range);
+					if (resultHeap.size() == k) {
+						long bound = resultHeap.tail().value;
+						if (Long.compareUnsigned(bound, threshold) > 0) {
+							threshold = bound;
+						}
+					}
+				}
+			}
+			return resultHeap;
+		}
+
+		private Heap<Row> findBottomRows(Heap<Block> blockHeap, int k, Bits buffer) {
 			var resultHeap = new Heap<>(Row.class, Comparator.naturalOrder(), k);
 			int blockCount = blockHeap.size();
 			Block[] blocks = blockHeap.backingArray();
-			Arrays.sort(blocks, 0, blockCount);
-			long threshold = blockCount < k ? -1L : blocks[blockCount - 1].blockMin;
+			Arrays.sort(blocks, 0, blockCount, Comparator.naturalOrder());
+			// fixme review this logic
+			long threshold = blockCount == 1 || blockCount < k ? -1L : blocks[blockCount - 1].delimiter;
 			for (int i = 0; i < blockCount; i++) {
 				var block = blocks[i];
 				if (resultHeap.size() == k) {
 					long bound = resultHeap.tail().value;
 					if (Long.compareUnsigned(bound, threshold) < 0)
 						threshold = bound;
-					if (Long.compareUnsigned(block.blockMin, threshold) >= 0)
+					if (Long.compareUnsigned(block.delimiter, threshold) >= 0)
 						break;
 				}
-				evaluateSingleBoundQueryBlock(data, block.offset, Math.min(rowCount - block.base, BLOCK_SIZE), buffer,
-						threshold, true);
-				int range = Math.min(BLOCK_SIZE, rowCount - block.base);
+				int range = Math.min(rowCount - block.base, BLOCK_SIZE);
+				evaluateSingleBoundQueryBlock(data, block.offset, range, buffer, threshold, bottom);
 				extractValuesToHeap(data, block, buffer, resultHeap, range);
 			}
 			return resultHeap;
@@ -473,15 +526,23 @@ public class SliceZ {
 			position += Long.BYTES;
 			long blockMin = data.getLong(position);
 			position += Long.BYTES;
+			long blockMax = data.getLong(position);
+			position += Long.BYTES;
 			// fixme allocate these at a higher scope for reuse across blocks
 			int size = filter.count(range);
 			long[] values = new long[size];
-			int[] valueToRow = new int[values.length];
-			for (int i = 0, r = 0; i < filter.bits.length && r < valueToRow.length; i++) {
-				long word = filter.bits[i];
-				while (word != 0 && r < valueToRow.length) {
-					valueToRow[r++] = i * Long.SIZE + Long.numberOfTrailingZeros(word);
-					word &= (word - 1);
+			// rowIndex is null when the value range is contiguous,
+			// which avoids needing to create the index at all, and avoids binary searches
+			// when the number of rows are at their densest
+			int[] rowIndex = null;
+			if (!filter.isFull()) {
+				rowIndex = new int[values.length];
+				for (int i = 0, r = 0; i < filter.bits.length && r < rowIndex.length; i++) {
+					long word = filter.bits[i];
+					while (word != 0 && r < rowIndex.length) {
+						rowIndex[r++] = i * Long.SIZE + Long.numberOfTrailingZeros(word);
+						word &= (word - 1);
+					}
 				}
 			}
 			long fullSlices = typesHigh & typesLow;
@@ -500,7 +561,7 @@ public class SliceZ {
 							position += Character.BYTES;
 							if (filter.contains(row)) {
 								// fixme - this is probably going to be a bottleneck
-								values[Arrays.binarySearch(valueToRow, row)] |= bit;
+								values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
 							}
 						}
 					}
@@ -514,7 +575,7 @@ public class SliceZ {
 							for (int row = prev; row < next; row++) {
 								if (filter.contains(row)) {
 									// fixme - this is probably going to be a bottleneck
-									values[Arrays.binarySearch(valueToRow, row)] |= bit;
+									values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
 								}
 							}
 							prev = next + 1;
@@ -522,7 +583,7 @@ public class SliceZ {
 						for (int row = prev; row < range; row++) {
 							if (filter.contains(row)) {
 								// fixme - this is probably going to be a bottleneck
-								values[Arrays.binarySearch(valueToRow, row)] |= bit;
+								values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
 							}
 						}
 					}
@@ -535,7 +596,7 @@ public class SliceZ {
 							while (rows != 0) {
 								int row = i * Long.SIZE + Long.numberOfTrailingZeros(rows);
 								// fixme probable bottleneck
-								values[Arrays.binarySearch(valueToRow, row)] |= bit;
+								values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
 								rows &= (rows - 1);
 							}
 						}
@@ -543,7 +604,8 @@ public class SliceZ {
 				}
 			}
 			for (int i = 0; i < values.length; i++) {
-				heap.add(new Row(blockMin + ~(fullSlices | values[i]), block.base + valueToRow[i]));
+				heap.add(new Row(blockMin + ~(fullSlices | values[i]),
+						block.base + (rowIndex == null ? i : rowIndex[i])));
 			}
 		}
 
@@ -659,7 +721,9 @@ public class SliceZ {
 			position += Long.BYTES;
 			long blockMin = data.getLong(position);
 			position += Long.BYTES;
-			if (Long.compareUnsigned(threshold, blockMin) < 0) {
+			long blockMax = data.getLong(position);
+			position += Long.BYTES;
+			if (Long.compareUnsigned(threshold, blockMin) < 0 || Long.compareUnsigned(threshold, blockMax) > 0) {
 				skipBlock(typesHigh, typesLow);
 				if (negate) {
 					buffer.fill(range);
@@ -706,6 +770,8 @@ public class SliceZ {
 			long typesLow = data.getLong(position);
 			position += Long.BYTES;
 			long blockMin = data.getLong(position);
+			position += Long.BYTES;
+			long blockMax = data.getLong(position);
 			position += Long.BYTES;
 			int blockStart = position;
 			buffer.reset();
@@ -812,6 +878,8 @@ public class SliceZ {
 			position += Long.BYTES;
 			long blockMin = data.getLong(position);
 			position += Long.BYTES;
+			long blockMax = data.getLong(position);
+			position += Long.BYTES;
 			boolean trivialUpperBound = Long.compareUnsigned(upper, blockMin) < 0;
 			boolean trivialLowerBound = Long.compareUnsigned(lower, blockMin) < 0;
 			if (trivialUpperBound) {
@@ -865,12 +933,23 @@ public class SliceZ {
 		position += Long.BYTES;
 		long blockMin = data.getLong(position);
 		position += Long.BYTES;
+		long blockMax = data.getLong(position);
+		position += Long.BYTES;
 		if (Long.compareUnsigned(threshold, blockMin) < 0) {
 			position = Util.skipBlock(data, position, typesHigh, typesLow);
 			if (upper) {
 				buffer.clear(range);
 			} else {
 				buffer.fill(range);
+			}
+			return position;
+		}
+		if (Long.compareUnsigned(threshold, blockMax) > 0) {
+			position = Util.skipBlock(data, position, typesHigh, typesLow);
+			if (upper) {
+				buffer.fill(range);
+			} else {
+				buffer.clear(range);
 			}
 			return position;
 		}

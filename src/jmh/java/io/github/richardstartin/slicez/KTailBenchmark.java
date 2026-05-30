@@ -15,6 +15,7 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
+import java.util.Arrays;
 import java.util.PrimitiveIterator;
 import java.util.concurrent.TimeUnit;
 
@@ -23,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 @Fork(value = 1, jvmArgsPrepend = {"-Xmx6g"})
 @Warmup(iterations = 5, time = 1)
 @Measurement(iterations = 10, time = 1)
-public class BottomKBenchmark {
+public class KTailBenchmark {
 
 	@State(Scope.Thread)
 	@AuxCounters(AuxCounters.Type.EVENTS)
@@ -72,5 +73,49 @@ public class BottomKBenchmark {
 		PrimitiveIterator.OfInt it = s.index.bottom(s.k);
 		while (it.hasNext())
 			bh.consume(it.nextInt());
+	}
+
+	@Benchmark
+	public void sliceZTopK(SliceZState s, Blackhole bh) {
+		PrimitiveIterator.OfInt it = s.index.top(s.k);
+		while (it.hasNext())
+			bh.consume(it.nextInt());
+	}
+
+	@State(Scope.Thread)
+	public static class HeapScanState {
+		@Param({"100000000"})
+		int size;
+		@Param({"UNIFORM_1", "UNIFORM_2", "EXP_0_1", "DOUBLES", "SAMPLED_PCS"})
+		DataGenerator data;
+		@Param({"10", "100", "1000"})
+		int k;
+
+		long[] values;
+
+		@Setup(Level.Trial)
+		public void setup() {
+			values = data.generate(size);
+		}
+	}
+
+	record Row(int id, long value) implements Comparable<Row> {
+
+		@Override
+		public int compareTo(Row o) {
+			return Long.compareUnsigned(value, o.value);
+		}
+	}
+
+	// @Benchmark
+	public void heapScan(HeapScanState state, Blackhole bh) {
+		var heap = new Heap<>(Row.class, Row::compareTo, state.k);
+		for (int i = 0; i < state.values.length; i++) {
+			heap.add(new Row(i, state.values[i]));
+		}
+		Arrays.sort(heap.backingArray());
+		for (Row row : heap.backingArray()) {
+			bh.consume(row.id);
+		}
 	}
 }

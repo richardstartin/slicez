@@ -17,6 +17,10 @@ class Bits {
 		this.bits = new long[numWords];
 	}
 
+	boolean isFull() {
+		return full;
+	}
+
 	public void reset() {
 		if (!empty) {
 			Arrays.fill(bits, 0L);
