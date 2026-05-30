@@ -538,7 +538,7 @@ class TestSliceZ {
         for (int i = 0; i < bitmap.length; i++) {
             expected[i] |= ~asBitmap[i];
         }
-        int position = SliceZ.sparseOrNot(bitmap, buffer, 0, bitmap.length * Long.SIZE);
+        int position = Util.sparseOrNot(bitmap, buffer, 0, bitmap.length * Long.SIZE);
         assertEquals(buffer.limit(), position);
         assertArrayEquals(expected, bitmap);
     }

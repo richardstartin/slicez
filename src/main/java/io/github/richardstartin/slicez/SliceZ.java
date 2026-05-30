@@ -3,16 +3,17 @@ package io.github.richardstartin.slicez;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.PrimitiveIterator;
 import java.util.function.LongConsumer;
 import java.util.stream.IntStream;
 
 public class SliceZ {
 
-    private static final int SPARSE_INVERTED = 0;
-    private static final int SPARSE = 1;
-    private static final int DENSE = 2;
-    private static final int FULL = 3;
+    static final int SPARSE_INVERTED = 0;
+    static final int SPARSE = 1;
+    static final int DENSE = 2;
+    static final int FULL = 3;
     private static final int BLOCK_COUNT = 4;
     private static final int SPARSE_SIZE = 5;
     private static final int NUM_COUNTS = SPARSE_SIZE + 1;
@@ -25,7 +26,7 @@ public class SliceZ {
             + NUM_COUNTS * Integer.BYTES; // counts
 
     static final int BLOCK_SIZE = 0x10000;
-    private static final int BLOCK_WORDS = BLOCK_SIZE / Long.SIZE; // 16
+    static final int BLOCK_WORDS = BLOCK_SIZE / Long.SIZE; // 16
     private static final int SPARSE_THRESHOLD = BLOCK_SIZE / Short.SIZE - 1;
 
     public static final class Appender implements LongConsumer {
@@ -271,7 +272,6 @@ public class SliceZ {
         return data.getInt(24 + offset * Integer.BYTES);
     }
 
-
     public PrimitiveIterator.OfInt lessThan(long value) {
         return value == 0L ? IntStream.empty().iterator() : lessThanOrEqual(value - 1);
     }
@@ -279,7 +279,6 @@ public class SliceZ {
     public int countLessThan(long value) {
         return value == 0L ? 0 : countLessThanOrEqual(value - 1);
     }
-
 
     public PrimitiveIterator.OfInt lessThanOrEqual(long value) {
         if (Long.compareUnsigned(value, min) < 0) {
@@ -387,292 +386,181 @@ public class SliceZ {
     }
 
     public PrimitiveIterator.OfInt bottom(int k) {
+        if (k < 0) {
+            throw new IllegalArgumentException("bottom-k negative k: " + k);
+        }
         if (k == 0) {
             return IntStream.empty().iterator();
         }
-        if (k >= rowCount) {
-            return IntStream.range(0, rowCount).iterator();
-        }
-        for (long candidate = min; Long.compareUnsigned(candidate, max) <= 0; candidate++) {
-            int count = countLessThanOrEqual(candidate);
-            if (count >= k) {
-                var it = lessThanOrEqual(candidate);
-                int[] indexes = new int[k];
-                for (int i = 0; i < k && it.hasNext(); i++) {
-                    indexes[i] = it.nextInt();
-                }
-                Arrays.sort(indexes);
-                return Arrays.stream(indexes).iterator();
-            }
-        }
-        throw new IllegalStateException("unreachable");
+        return new BottomKQuery(k);
     }
 
-    private static class Bits {
+    private class BottomKQuery implements PrimitiveIterator.OfInt {
 
-        private final long[] bits;
-        private boolean empty = true;
-        private boolean full;
+        private record Block(long blockMin, int offset, int base) implements Comparable<Block> {
 
-        public Bits() {
-            this(BLOCK_WORDS);
-        }
-
-        public Bits(int numWords) {
-            this.bits = new long[numWords];
-        }
-
-        public void reset() {
-            if (!empty) {
-                Arrays.fill(bits, 0L);
+            @Override
+            public int compareTo(Block o) {
+                return Long.compareUnsigned(blockMin, o.blockMin);
             }
-            empty = true;
-            full = false;
         }
 
-        public int capacity() {
-            return bits.length * Long.SIZE;
-        }
+        private record Row(long value, int rid) implements Comparable<Row> {
 
-        public void clear(int limit) {
-            if (!empty) {
-                clearBitmap(bits, 0, limit);
-                empty = true;
+            @Override
+            public int compareTo(Row o) {
+                return Long.compareUnsigned(value, o.value);
             }
-            full = false;
         }
 
-        public void fill(int limit) {
-            if (!full) {
-                fillBitmap(bits, 0, limit);
-                full = true;
+        private final Row[] rows;
+        private final int resultCount;
+
+        private int it;
+
+        private BottomKQuery(int k) {
+            var blockHeap = findCandidateBlocks(k);
+            var resultsHeap = findRows(blockHeap, k, new Bits());
+            this.resultCount = resultsHeap.size();
+            this.rows = prepareResults(resultsHeap);
+        }
+
+        private Heap<Block> findCandidateBlocks(int k) {
+            var blockHeap = new Heap<>(Block.class, Comparator.naturalOrder(), k);
+            int position = HEADER_SIZE;
+            int base = 0;
+            while (base < rowCount) {
+                int blockOffset = position;
+                long typesHigh = data.getLong(position);
+                position += Long.BYTES;
+                long typesLow = data.getLong(position);
+                position += Long.BYTES;
+                long blockMin = data.getLong(position);
+                position += Long.BYTES;
+                position = Util.skipBlock(data, position, typesHigh, typesLow);
+                blockHeap.add(new Block(blockMin, blockOffset, base));
+                base += BLOCK_SIZE;
             }
-            empty = false;
+            return blockHeap;
         }
 
-        public int denseOr(int position, ByteBuffer data) {
-            if (!full) {
-                if (empty) {
-                    // data.slice(position, bits.length * Long.BYTES).asLongBuffer().get(bits);
-                    // we know by the fact the data is represented by a bitset that it is not full
-                    for (int i = 0; i < bits.length; i++) {
-                        bits[i] = data.getLong(position + i * Long.BYTES);
-                    }
-                } else {
-                    for (int i = 0; i < bits.length; i++) {
-                        bits[i] |= data.getLong(position + i * Long.BYTES);
-                    }
-                    boolean filled = true;
-                    for (int i = 0; i < bits.length && filled; i += 8) {
-                        filled = -1L == (bits[i] & bits[i + 1] & bits[i + 2] & bits[i + 3] & bits[i + 4] & bits[i + 5] & bits[i + 6] & bits[i + 7]);
-                    }
-                    full = filled;
+        private Heap<Row> findRows(Heap<Block> blockHeap, int k, Bits buffer) {
+            var resultHeap = new Heap<>(Row.class, Comparator.naturalOrder(), k);
+            int blockCount = blockHeap.size();
+            Block[] blocks = blockHeap.backingArray();
+            Arrays.sort(blocks, 0, blockCount);
+            long threshold = blockCount < k ? -1L : blocks[blockCount - 1].blockMin;
+            for (int i = 0; i < blockCount; i++) {
+                var block = blocks[i];
+                if (resultHeap.size() == k) {
+                    long bound = resultHeap.tail().value;
+                    if (Long.compareUnsigned(bound, threshold) < 0) threshold = bound;
+                    if (Long.compareUnsigned(block.blockMin, threshold) >= 0) break;
+                }
+                evaluateSingleBoundQueryBlock(data, block.offset,
+                        Math.min(rowCount - block.base, BLOCK_SIZE), buffer, threshold, true);
+                int range = Math.min(BLOCK_SIZE, rowCount - block.base);
+                extractValuesToHeap(data, block, buffer, resultHeap, range);
+            }
+            return resultHeap;
+        }
+
+        private void extractValuesToHeap(ByteBuffer data, Block block, Bits filter, Heap<Row> heap, int range) {
+            int position = block.offset;
+            long typesHigh = data.getLong(position);
+            position += Long.BYTES;
+            long typesLow = data.getLong(position);
+            position += Long.BYTES;
+            long blockMin = data.getLong(position);
+            position += Long.BYTES;
+            // fixme allocate these at a higher scope for reuse across blocks
+            int size = filter.count(range);
+            long[] values = new long[size];
+            int[] valueToRow = new int[values.length];
+            for (int i = 0, r = 0; i < filter.bits.length && r < valueToRow.length; i++) {
+                long word = filter.bits[i];
+                while (word != 0 && r < valueToRow.length) {
+                    valueToRow[r++] = i * Long.SIZE + Long.numberOfTrailingZeros(word);
+                    word &= (word - 1);
                 }
             }
-            empty = false;
-            return position + BLOCK_WORDS * Long.BYTES;
-        }
-
-        public int denseAnd(int position, ByteBuffer data) {
-            if (!empty) {
-                if (full) {
-                    // data cannot be empty
-                    for (int i = 0; i < bits.length; i++) {
-                        bits[i] = data.getLong(position + i * Long.BYTES);
-                    }
-                } else {
-                    for (int i = 0; i < bits.length; i++) {
-                        bits[i] &= data.getLong(position + i * Long.BYTES);
-                    }
-                    boolean emptied = true;
-                    for (int i = 0; i < bits.length && emptied; i += 8) {
-                        emptied = (0L == (bits[i] | bits[i + 1] | bits[i + 2] | bits[i + 3] | bits[i + 4] | bits[i + 5] | bits[i + 6] | bits[i + 7]));
-                    }
-                    empty = emptied;
-                }
-            }
-            full = false;
-            return position + BLOCK_WORDS * Long.BYTES;
-        }
-
-        public int denseAndNot(int position, ByteBuffer data) {
-            if (!empty) {
-                if (full) {
-                    // data stored as bitset must not be empty or full
-                    // so cannot result in empty bits
-                    for (int i = 0; i < bits.length; i++) {
-                        bits[i] = ~data.getLong(position + i * Long.BYTES);
-                    }
-                } else {
-                    for (int i = 0; i < bits.length; i++) {
-                        bits[i] &= ~data.getLong(position + i * Long.BYTES);
-                    }
-                    boolean emptied = true;
-                    for (int i = 0; i < bits.length && emptied; i += 8) {
-                        emptied = 0L == (bits[i] | bits[i + 1] | bits[i + 2] | bits[i + 3] | bits[i + 4] | bits[i + 5] | bits[i + 6] | bits[i + 7]);
-                    }
-                    empty = emptied;
-                }
-            }
-            full = false;
-            return position + BLOCK_WORDS * Long.BYTES;
-        }
-
-        public int sparseOrNot(int position, ByteBuffer data, int range) {
-            if (!full) {
-                int advancedTo = empty
-                        ? SliceZ.coveredSparseOrNot(bits, data, position, range)
-                        : SliceZ.sparseOrNot(bits, data, position, range);
-                full = advancedTo < 0;
-                empty = false;
-                return Math.abs(advancedTo);
-            } else {
-                return SliceZ.skipSparse(data, position);
-            }
-        }
-
-        public int sparseOr(int position, ByteBuffer data) {
-            if (!full) {
-                int advancedTo = SliceZ.sparseOr(bits, data, position);
-                full = advancedTo < 0;
-                empty = false;
-                return Math.abs(advancedTo);
-            } else {
-                return SliceZ.skipSparse(data, position);
-            }
-        }
-
-        public int sparseAnd(int position, ByteBuffer data, int range) {
-            if (!empty) {
-                int advancedTo = full
-                        ? SliceZ.coveredSparseAnd(bits, data, position)
-                        : SliceZ.sparseAnd(bits, data, position, range);
-                empty = advancedTo <= 0;
-                full = false;
-                return Math.abs(advancedTo);
-            } else {
-                full = false;
-                return SliceZ.skipSparse(data, position);
-            }
-        }
-
-        public int sparseAndNot(int position, ByteBuffer data, int range) {
-            if (!empty) {
-                int advancedTo = SliceZ.sparseAndNot(bits, data, position, range);
-                empty = advancedTo <= 0;
-                full = false;
-                return Math.abs(advancedTo);
-            }
-            full = false;
-            return SliceZ.skipSparse(data, position);
-        }
-
-        public void flip(int range) {
-            if (empty) {
-                empty = false;
-                full = true;
-                fillBitmap(bits, 0, range);
-            } else if (full) {
-                full = false;
-                empty = true;
-                clearBitmap(bits, 0, range);
-            } else {
-                flipBitmap(bits, 0, range);
-            }
-        }
-
-        public void flipAnd(Bits other) {
-            if (!full && !other.empty) {
-                if (empty) {
-                    System.arraycopy(other.bits, 0, bits, 0, bits.length);
-                    empty = false;
-                    full = other.full;
-                } else {
-                    for (int i = 0; i < bits.length; i++) {
-                        bits[i] = ~bits[i] & other.bits[i];
-                    }
-                }
-            } else {
-                Arrays.fill(bits, 0L);
-                full = false;
-                empty = true;
-            }
-        }
-
-        public void or(Bits other) {
-            if (!full && !other.empty) {
-                if (other.full) {
-                  Arrays.fill(bits, -1L);
-                  full = true;
-                  empty = false;
-                } else if (empty) {
-                    System.arraycopy(other.bits, 0, bits, 0, bits.length);
-                    empty = false;
-                } else {
-                    for (int i = 0; i < bits.length; i++) {
-                        bits[i] |= other.bits[i];
-                    }
-                    empty = false;
-                }
-            }
-        }
-
-        public long extractBits(int base, int range, int[] output) {
-            int outputLimit = 0;
-            if (!empty) {
-                if (full) {
-                    outputLimit = range;
-                    for (int i = 0; i < outputLimit; i++) {
-                        output[i] = base + i;
-                    }
-                } else {
-                    int lastWordIndex = range >>> 6;
-                    int b = base;
-                    for (int i = 0; i < lastWordIndex; i++, b += Long.SIZE) {
-                        long word = bits[i];
-                        // try to avoid data dependent bit extraction for common case
-                        if (word == -1L) {
-                            for (int j = 0; j < Long.SIZE; j++) {
-                                output[outputLimit + j] = b + j;
-                            }
-                            outputLimit += Long.SIZE;
-                        } else {
-                            while (word != 0) {
-                                output[outputLimit++] = b + Long.numberOfTrailingZeros(word);
-                                word &= (word - 1);
+            long fullSlices = typesHigh & typesLow;
+            long storedSlices = ~fullSlices;
+            while (storedSlices != 0) {
+                int slice = Long.numberOfTrailingZeros(storedSlices);
+                storedSlices &= (storedSlices - 1);
+                int type = ((int) ((typesHigh >>> slice) & 1) << 1) | (int) ((typesLow >>> slice) & 1);
+                long bit = 1L << slice;
+                switch (type) {
+                    case SPARSE -> {
+                        int count = data.getChar(position);
+                        position += Character.BYTES;
+                        for (int i = 0; i < count; i++) {
+                            int row = data.getChar(position);
+                            position += Character.BYTES;
+                            if (filter.contains(row)) {
+                                // fixme - this is probably going to be a bottleneck
+                                values[Arrays.binarySearch(valueToRow, row)] |= bit;
                             }
                         }
                     }
-                    if (lastWordIndex != bits.length) {
-                        long mask = (range & 63) == 0 ? 0xFFFFFFFFFFFFFFFFL : (1L << range) - 1;
-                        long word = bits[lastWordIndex] & mask;
-                        while (word != 0) {
-                            output[outputLimit++] = b + Long.numberOfTrailingZeros(word);
-                            word &= (word - 1);
+                    case SPARSE_INVERTED -> {
+                        int count = data.getChar(position);
+                        position += Character.BYTES;
+                        int prev = 0;
+                        for (int i = 0; i < count; i++) {
+                            int next = data.getChar(position);
+                            position += Character.BYTES;
+                            for (int row = prev; row < next; row++) {
+                                if (filter.contains(row)) {
+                                    // fixme - this is probably going to be a bottleneck
+                                    values[Arrays.binarySearch(valueToRow, row)] |= bit;
+                                }
+                            }
+                            prev = next + 1;
+                        }
+                        for (int row = prev; row < range; row++) {
+                            if (filter.contains(row)) {
+                                // fixme - this is probably going to be a bottleneck
+                                values[Arrays.binarySearch(valueToRow, row)] |= bit;
+                            }
+                        }
+                    }
+                    case DENSE -> {
+                        for (int i = 0; i < BLOCK_WORDS; i++) {
+                            long filterWord = filter.bits[i];
+                            long storedWord = data.getLong(position);
+                            position += Long.BYTES;
+                            long rows = filterWord & storedWord;
+                            while (rows != 0) {
+                                int row = i * Long.SIZE + Long.numberOfTrailingZeros(rows);
+                                // fixme probable bottleneck
+                                values[Arrays.binarySearch(valueToRow, row)] |= bit;
+                                rows &= (rows - 1);
+                            }
                         }
                     }
                 }
             }
-            return outputLimit | ((long) (base + BLOCK_SIZE) << 32);
+            for (int i = 0; i < values.length; i++) {
+                heap.add(new Row(blockMin + ~(fullSlices | values[i]), block.base + valueToRow[i]));
+            }
         }
 
-        public int count(int limit) {
-            if (empty) {
-                return 0;
-            }
-            if (full) {
-                return limit;
-            }
-            int count = 0;
-            int lastWordIndex = (limit >>> 6);
-            for (int i = 0; i < lastWordIndex; i++) {
-                count += Long.bitCount(bits[i]);
-            }
-            if (lastWordIndex != bits.length) {
-                long mask = (limit & 63) == limit ? 0xFFFFFFFFFFFFFFFFL : (1L << limit) - 1;
-                count += Long.bitCount(bits[lastWordIndex] & mask);
-            }
-            return count;
+        private Row[] prepareResults(Heap<Row> resultsHeap) {
+            var rows = resultsHeap.backingArray();
+            Arrays.sort(rows, 0, resultsHeap.size(), Comparator.comparingInt(Row::rid));
+            return rows;
+        }
+
+        @Override
+        public int nextInt() {
+            return rows[it++].rid;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return it < resultCount;
         }
     }
 
@@ -716,13 +604,7 @@ public class SliceZ {
         }
 
         protected void skipBlock(long typesHigh, long typesLow) {
-            long storedSlices = ~(typesHigh & typesLow);
-            while (storedSlices != 0) {
-                int bit = Long.numberOfTrailingZeros(storedSlices);
-                int type = ((int) ((typesHigh >>> bit) & 1) << 1) | (int) ((typesLow >>> bit) & 1);
-                position = skipSlice(type, data, position);
-                storedSlices &= (storedSlices - 1);
-            }
+            position = Util.skipBlock(data, position, typesHigh, typesLow);
         }
 
         protected final int range() {
@@ -752,83 +634,7 @@ public class SliceZ {
         @Override
         protected void evaluateBlock() {
             int range = range();
-            long typesHigh = data.getLong(position);
-            position += Long.BYTES;
-            long typesLow = data.getLong(position);
-            position += Long.BYTES;
-            long blockMin = data.getLong(position);
-            position += Long.BYTES;
-            if (Long.compareUnsigned(threshold, blockMin) < 0) {
-                skipBlock(typesHigh, typesLow);
-                if (upper) {
-                    buffer.clear(range);
-                } else {
-                    buffer.fill(range);
-                }
-                return;
-            }
-            long anchoredThreshold = threshold - blockMin;
-            int firstRelevantSlice = firstRelevantSlice(anchoredThreshold, typesHigh, typesLow);
-            if (firstRelevantSlice > 0) {
-                if ((typesHigh & typesLow & (1L << firstRelevantSlice)) != 0) {
-                    buffer.fill(range);
-                } else {
-                    buffer.clear(range);
-                }
-            }
-            int type = ((int) (typesHigh & 1) << 1) | (int) (typesLow & 1);
-            typesHigh >>>= 1;
-            typesLow >>>= 1;
-            // first slice is special - if the threshold includes it just fill the buffer
-            if (firstRelevantSlice == 0) {
-                if ((anchoredThreshold & 1) == 1) {
-                    buffer.fill(range);
-                    position = skipSlice(type, data, position);
-                } else {
-                    buffer.reset();
-                    switch (type) {
-                        case SPARSE_INVERTED -> position = buffer.sparseOrNot(position, data, range);
-                        case SPARSE -> position = buffer.sparseOr(position, data);
-                        case DENSE -> position = buffer.denseOr(position, data);
-                        case FULL -> buffer.fill(range);
-                    }
-                }
-            } else {
-                position = skipSlice(type, data, position);
-            }
-            // process the other slices
-            int slice = 1;
-            for (; slice <= firstRelevantSlice; slice++) {
-                type = ((int) (typesHigh & 1) << 1) | (int) (typesLow & 1);
-                position = skipSlice(type, data, position);
-                typesHigh >>>= 1;
-                typesLow >>>= 1;
-            }
-            for (; slice < Long.SIZE; slice++) {
-                type = ((int) (typesHigh & 1) << 1) | (int) (typesLow & 1);
-                if ((anchoredThreshold & (1L << slice)) != 0) {
-                    // do union
-                    switch (type) {
-                        case SPARSE_INVERTED -> position = buffer.sparseOrNot(position, data, range);
-                        case SPARSE -> position = buffer.sparseOr(position, data);
-                        case DENSE -> position = buffer.denseOr(position, data);
-                        case FULL -> buffer.fill(range);
-                    }
-                } else {
-                    switch (type) {
-                        case SPARSE_INVERTED -> position = buffer.sparseAndNot(position, data, range);
-                        case SPARSE -> position = buffer.sparseAnd(position, data, range);
-                        case DENSE -> position = buffer.denseAnd(position, data);
-                        case FULL -> {
-                        } // nothing to do
-                    }
-                }
-                typesHigh >>>= 1;
-                typesLow >>>= 1;
-            }
-            if (!upper) {
-                buffer.flip(range);
-            }
+            position = evaluateSingleBoundQueryBlock(data, position, range, buffer, threshold, upper);
         }
     }
 
@@ -1011,14 +817,14 @@ public class SliceZ {
             }
             long anchoredLower = lower - blockMin;
             long anchoredUpper = upper - blockMin;
-            int lowerStart = trivialLowerBound ? Long.SIZE : firstRelevantSlice(anchoredLower, typesHigh, typesLow);
+            int lowerStart = trivialLowerBound ? Long.SIZE : Util.firstRelevantSlice(anchoredLower, typesHigh, typesLow);
             if (trivialLowerBound) {
                 buffer.clear(range);
             } else {
                 buffer.reset();
             }
             buffer2.reset();
-            int upperStart = firstRelevantSlice(anchoredUpper, typesHigh, typesLow);
+            int upperStart = Util.firstRelevantSlice(anchoredUpper, typesHigh, typesLow);
             for (int i = 0; i < Long.SIZE; i++) {
                 int type = ((int) (typesHigh & 1) << 1) | (int) (typesLow & 1);
                 typesHigh >>>= 1;
@@ -1043,6 +849,87 @@ public class SliceZ {
             }
             buffer.flipAnd(buffer2);
         }
+    }
+
+    private static int evaluateSingleBoundQueryBlock(ByteBuffer data, int position, int range, Bits buffer, long threshold, boolean upper) {
+        long typesHigh = data.getLong(position);
+        position += Long.BYTES;
+        long typesLow = data.getLong(position);
+        position += Long.BYTES;
+        long blockMin = data.getLong(position);
+        position += Long.BYTES;
+        if (Long.compareUnsigned(threshold, blockMin) < 0) {
+            position = Util.skipBlock(data, position, typesHigh, typesLow);
+            if (upper) {
+                buffer.clear(range);
+            } else {
+                buffer.fill(range);
+            }
+            return position;
+        }
+        long anchoredThreshold = threshold - blockMin;
+        int firstRelevantSlice = Util.firstRelevantSlice(anchoredThreshold, typesHigh, typesLow);
+        if (firstRelevantSlice > 0) {
+            if ((typesHigh & typesLow & (1L << firstRelevantSlice)) != 0) {
+                buffer.fill(range);
+            } else {
+                buffer.clear(range);
+            }
+        }
+        int type = ((int) (typesHigh & 1) << 1) | (int) (typesLow & 1);
+        typesHigh >>>= 1;
+        typesLow >>>= 1;
+        // first slice is special - if the threshold includes it just fill the buffer
+        if (firstRelevantSlice == 0) {
+            if ((anchoredThreshold & 1) == 1) {
+                buffer.fill(range);
+                position = Util.skipSlice(type, data, position);
+            } else {
+                buffer.reset();
+                switch (type) {
+                    case SPARSE_INVERTED -> position = buffer.sparseOrNot(position, data, range);
+                    case SPARSE -> position = buffer.sparseOr(position, data);
+                    case DENSE -> position = buffer.denseOr(position, data);
+                    case FULL -> buffer.fill(range);
+                }
+            }
+        } else {
+            position = Util.skipSlice(type, data, position);
+        }
+        // process the other slices
+        int slice = 1;
+        for (; slice <= firstRelevantSlice; slice++) {
+            type = ((int) (typesHigh & 1) << 1) | (int) (typesLow & 1);
+            position = Util.skipSlice(type, data, position);
+            typesHigh >>>= 1;
+            typesLow >>>= 1;
+        }
+        for (; slice < Long.SIZE; slice++) {
+            type = ((int) (typesHigh & 1) << 1) | (int) (typesLow & 1);
+            if ((anchoredThreshold & (1L << slice)) != 0) {
+                // do union
+                switch (type) {
+                    case SPARSE_INVERTED -> position = buffer.sparseOrNot(position, data, range);
+                    case SPARSE -> position = buffer.sparseOr(position, data);
+                    case DENSE -> position = buffer.denseOr(position, data);
+                    case FULL -> buffer.fill(range);
+                }
+            } else {
+                switch (type) {
+                    case SPARSE_INVERTED -> position = buffer.sparseAndNot(position, data, range);
+                    case SPARSE -> position = buffer.sparseAnd(position, data, range);
+                    case DENSE -> position = buffer.denseAnd(position, data);
+                    case FULL -> {
+                    } // nothing to do
+                }
+            }
+            typesHigh >>>= 1;
+            typesLow >>>= 1;
+        }
+        if (!upper) {
+            buffer.flip(range);
+        }
+        return position;
     }
 
     private static int evaluateBlockForEquality(int position,
@@ -1094,196 +981,5 @@ public class SliceZ {
     }
 
 
-    private static int skipSlice(int type, ByteBuffer data, int position) {
-        return switch (type) {
-            case SPARSE_INVERTED, SPARSE -> skipSparse(data, position);
-            case DENSE -> skipDense(position);
-            case FULL -> position;// nothing stored
-            default -> throw new IllegalStateException("invalid type: " + type);
-        };
-    }
-
-    private static int firstRelevantSlice(long threshold, long typesHigh, long typesLow) {
-        long fullSlices = typesHigh & typesLow;
-        long presentFullSlices = fullSlices & threshold;
-        int skipFull = 64 - Long.numberOfLeadingZeros(presentFullSlices);
-        // when this slice is reached, the lower bitmap will be empty or full, obliterating any work done previously
-        return Math.max(0, skipFull - 1);
-    }
-
-    private static int sparseAnd(long[] bitmap, ByteBuffer buffer, int position, int max) {
-        int count = buffer.getChar(position);
-        position += Character.BYTES;
-        int prev = 0;
-        boolean emptied = true;
-        for (int j = 0; j < count; j++) {
-            int value = buffer.getChar(position);
-            position += Character.BYTES;
-            emptied &= (bitmap[value >>> 6] & (1L << value)) == 0L;
-            clearBitmap(bitmap, prev, value);
-            prev = value + 1;
-        }
-        clearBitmap(bitmap, prev, max);
-        return emptied ? -position : position;
-    }
-
-    private static int coveredSparseAnd(long[] bitmap, ByteBuffer buffer, int position) {
-        // precondition: bitmap contains every bit in the sparse slice
-        Arrays.fill(bitmap, 0L);
-        int count = buffer.getChar(position);
-        position += Character.BYTES;
-        for (int j = 0; j < count; j++, position += Character.BYTES) {
-            int value = buffer.getChar(position);
-            bitmap[value >>> 6] |= (1L << value);
-        }
-        // postcondition: bitmap is neither empty nor full
-        return position;
-    }
-
-    private static int sparseAndNot(long[] bitmap, ByteBuffer buffer, int position, int range) {
-        int count = buffer.getChar(position);
-        position += Character.BYTES;
-        int limit = position + count * Character.BYTES;
-        boolean foundNonEmptyWord = false;
-        for (int p = position; p + Character.BYTES < limit; p += Character.BYTES * 2) {
-            int value1 = buffer.getChar(p);
-            int value2 = buffer.getChar(p + Character.BYTES);
-            int wi1 = value1 >>> 6;
-            int wi2 = value2 >>> 6;
-            if (wi1 == wi2) {
-                bitmap[wi1] &= ~((1L << value1) | (1L << value2));
-                foundNonEmptyWord |= bitmap[wi1] != 0L;
-            } else {
-                bitmap[wi1] &= ~(1L << value1);
-                bitmap[wi2] &= ~(1L << value2);
-                foundNonEmptyWord |= bitmap[wi1] != 0L;
-                foundNonEmptyWord |= bitmap[wi2] != 0L;
-            }
-        }
-        if ((count & 1) == 1) {
-            int value = buffer.getChar(limit - Character.BYTES);
-            bitmap[value >>> 6] &= ~(1L << value);
-            foundNonEmptyWord |= bitmap[value >>> 6] != 0L;
-        }
-        position = limit;
-        boolean emptied = !foundNonEmptyWord;
-        for (int i = 0; i < range >>> 6 && emptied; i += 8) {
-            emptied = 0L == (bitmap[i] | bitmap[i + 1] | bitmap[i + 2] | bitmap[i + 3] | bitmap[i + 4] | bitmap[i + 5] | bitmap[i + 6] | bitmap[i + 7]);
-        }
-        return emptied ? -position : position;
-    }
-
-    private static int sparseOr(long[] bitmap, ByteBuffer buffer, int position) {
-        int count = buffer.getChar(position);
-        position += Character.BYTES;
-        int limit = position + count * Character.BYTES;
-        for (int p = position; p + Character.BYTES < limit; p += Character.BYTES * 2) {
-            int v1 = buffer.getChar(p);
-            int v2 = buffer.getChar(p + Character.BYTES);
-            int wi1 = v1 >>> 6;
-            int wi2 = v2 >>> 6;
-            if (wi1 == wi2) {
-                bitmap[wi1] |= (1L << v1) | (1L << v2);
-            } else {
-                bitmap[wi1] |= (1L << v1);
-                bitmap[wi2] |= (1L << v2);
-            }
-        }
-        if ((count & 1) == 1) {
-            int value = buffer.getChar(limit - Character.BYTES);
-            bitmap[value >>> 6] |= 1L << value;
-        }
-        position = limit;
-        boolean filled = true;
-        for (int i = 0; i < bitmap.length && filled; i += 8) {
-            filled = -1L == (bitmap[i] & bitmap[i + 1] & bitmap[i + 2] & bitmap[i + 3] & bitmap[i + 4] & bitmap[i + 5] & bitmap[i + 6] & bitmap[i + 7]);
-        }
-        return filled ? -position : position;
-    }
-
-    static int sparseOrNot(long[] bitmap, ByteBuffer buffer, int position, int max) {
-        int count = buffer.getChar(position);
-        position += Character.BYTES;
-        int prev = 0;
-        boolean filled = true;
-        for (int j = 0; j < count; j++) {
-            int value = buffer.getChar(position);
-            position += Character.BYTES;
-            filled &= (bitmap[value >>> 6] & (1L << value)) != 0;
-            fillBitmap(bitmap, prev, value);
-            prev = value + 1;
-        }
-        fillBitmap(bitmap, prev, max);
-        return filled ? -position : position;
-    }
-
-    private static int coveredSparseOrNot(long[] bitmap, ByteBuffer buffer, int position, int max) {
-        // precondition: bitmap is empty
-        int count = buffer.getChar(position);
-        position += Character.BYTES;
-        fillBitmap(bitmap, 0, max);
-        for (int j = 0; j < count; j++, position += Character.BYTES) {
-            int value = buffer.getChar(position);
-            bitmap[value >>> 6] ^= (1L << value);
-        }
-        return position;
-    }
-
-    private static int skipSparse(ByteBuffer buffer, int position) {
-        int count = buffer.getChar(position);
-        return position + Character.BYTES * (1 + count);
-    }
-
-    private static int skipDense(int position) {
-        return position + BLOCK_WORDS * Long.BYTES;
-    }
-
-    private static void flipBitmap(long[] bitmap, int min, int max) {
-        if (min == max) {
-            return;
-        }
-        int first = min >>> 6;
-        int last = (max - 1) >>> 6;
-        bitmap[first] ^= ~(-1L << min);
-        for (int i = first; i < last; i++) {
-            bitmap[i] = ~bitmap[i];
-        }
-        bitmap[last] ^= -1L >>> -max;
-    }
-
-    private static void fillBitmap(long[] bitmap, int min, int max) {
-        if (min == max) {
-            return;
-        }
-        int first = min >>> 6;
-        int last = (max - 1) >>> 6;
-        if (first == last) {
-            bitmap[first] |= (-1L << min) & (-1L >>> -max);
-            return;
-        }
-        bitmap[first] |= -1L << min;
-        for (int i = first + 1; i < last; i++) {
-            bitmap[i] = -1L;
-        }
-        bitmap[last] |= -1L >>> -max;
-    }
-
-    static void clearBitmap(long[] bitmap, int min, int max) {
-        if (min == max) {
-            return;
-        }
-        int first = min >>> 6;
-        int last = (max - 1) >>> 6;
-
-        if (first == last) {
-            bitmap[first] &= ~((-1L << min) & (-1L >>> -max));
-            return;
-        }
-        bitmap[first] &= ~(-1L << min);
-        for (int i = first + 1; i < last; i++) {
-            bitmap[i] = 0;
-        }
-        bitmap[last] &= ~(-1L >>> -max);
-    }
 }
 
