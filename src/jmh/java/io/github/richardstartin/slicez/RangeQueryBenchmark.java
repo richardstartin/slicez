@@ -27,95 +27,98 @@ import java.util.concurrent.TimeUnit;
 @Measurement(iterations = 10, time = 1)
 public class RangeQueryBenchmark {
 
-    private static long[] percentileBounds(long[] values) {
-        long[] sorted = values.clone();
-        Arrays.sort(sorted);
-        return new long[]{sorted[50 * (values.length / 100)], sorted[51 * (values.length / 100)]};
-    }
+	private static long[] percentileBounds(long[] values) {
+		long[] sorted = values.clone();
+		Arrays.sort(sorted);
+		return new long[]{sorted[50 * (values.length / 100)], sorted[51 * (values.length / 100)]};
+	}
 
-    @State(Scope.Benchmark)
-    public static class BaseState {
-        @Param({"100000000"})
-        int size;
-        @Param({"UNIFORM_1", "UNIFORM_2", "EXP_0_1", "DOUBLES", "SAMPLED_PCS"})
-        DataGenerator data;
+	@State(Scope.Benchmark)
+	public static class BaseState {
+		@Param({"100000000"})
+		int size;
+		@Param({"UNIFORM_1", "UNIFORM_2", "EXP_0_1", "DOUBLES", "SAMPLED_PCS"})
+		DataGenerator data;
 
-        public long[] generateValues() {
-            return data.generate(size);
-        }
-    }
+		public long[] generateValues() {
+			return data.generate(size);
+		}
+	}
 
-    @State(Scope.Thread)
-    @AuxCounters(AuxCounters.Type.EVENTS)
-    public static class RangeBitmapState extends BaseState {
-        RangeBitmap index;
-        long lower, upper;
-        private long serializedSize;
+	@State(Scope.Thread)
+	@AuxCounters(AuxCounters.Type.EVENTS)
+	public static class RangeBitmapState extends BaseState {
+		RangeBitmap index;
+		long lower, upper;
+		private long serializedSize;
 
-        @Setup(Level.Trial)
-        public void setup() {
-            long[] values = generateValues();
-            long[] bounds = percentileBounds(values);
-            lower = bounds[0];
-            upper = bounds[1];
-            var rba = RangeBitmap.appender(-1L);
-            Arrays.stream(values).forEach(rba::add);
-            index = rba.build();
-            serializedSize = rba.serializedSizeInBytes();
-        }
+		@Setup(Level.Trial)
+		public void setup() {
+			long[] values = generateValues();
+			long[] bounds = percentileBounds(values);
+			lower = bounds[0];
+			upper = bounds[1];
+			var rba = RangeBitmap.appender(-1L);
+			Arrays.stream(values).forEach(rba::add);
+			index = rba.build();
+			serializedSize = rba.serializedSizeInBytes();
+		}
 
-        public double getCompressionRatio() {
-            return serializedSize / (size * 8d);
-        }
-    }
+		public double getCompressionRatio() {
+			return serializedSize / (size * 8d);
+		}
+	}
 
-    @State(Scope.Thread)
-    @AuxCounters(AuxCounters.Type.EVENTS)
-    public static class SliceZState extends BaseState {
-        SliceZ index;
-        long lower, upper;
+	@State(Scope.Thread)
+	@AuxCounters(AuxCounters.Type.EVENTS)
+	public static class SliceZState extends BaseState {
+		SliceZ index;
+		long lower, upper;
 
-        @Setup(Level.Trial)
-        public void setup() {
-            long[] values = generateValues();
-            long[] bounds = percentileBounds(values);
-            lower = bounds[0];
-            upper = bounds[1];
-            SliceZ.Appender appender = SliceZ.appender();
-            for (long value : values) appender.add(value);
-            index = appender.build();
-        }
+		@Setup(Level.Trial)
+		public void setup() {
+			long[] values = generateValues();
+			long[] bounds = percentileBounds(values);
+			lower = bounds[0];
+			upper = bounds[1];
+			SliceZ.Appender appender = SliceZ.appender();
+			for (long value : values)
+				appender.add(value);
+			index = appender.build();
+		}
 
-        public int getSparseInvertedCount() {
-            return index.getSparseInvertedSliceCount();
-        }
+		public int getSparseInvertedCount() {
+			return index.getSparseInvertedSliceCount();
+		}
 
-        public int getSparseCount() {
-            return index.getSparseSliceCount();
-        }
+		public int getSparseCount() {
+			return index.getSparseSliceCount();
+		}
 
-        public int getDenseCount() {
-            return index.getDenseSliceCount();
-        }
+		public int getDenseCount() {
+			return index.getDenseSliceCount();
+		}
 
-        public int getFullCount() {
-            return index.getFullSliceCount();
-        }
+		public int getFullCount() {
+			return index.getFullSliceCount();
+		}
 
-        public double getCompressionRatio() {
-            return index.getCompressionRatio();
-        }
-    }
+		public double getCompressionRatio() {
+			return index.getCompressionRatio();
+		}
+	}
 
-    @Benchmark
-    public void rangeBitmapBetween(RangeBitmapState s, Blackhole bh) {
-        var it = s.index.between(s.lower, s.upper).getIntIterator();
-        while (it.hasNext()) bh.consume(it.next());
-    }
+	@Benchmark
+	public void rangeBitmapBetween(RangeBitmapState s, Blackhole bh) {
+		var it = s.index.between(s.lower, s.upper).getIntIterator();
+		while (it.hasNext())
+			bh.consume(it.next());
+	}
 
-    @Benchmark
-    public void SliceZBetween(SliceZState s, Blackhole bh) {
-        PrimitiveIterator.OfInt it = s.index.between(s.lower, s.upper);
-        while (it.hasNext()) bh.consume(it.nextInt());
-    }
+	@Benchmark
+	public void SliceZBetween(SliceZState s, Blackhole bh) {
+		PrimitiveIterator.OfInt it = s.index.between(s.lower, s.upper);
+		while (it.hasNext())
+			bh.consume(it.nextInt());
+	}
 }

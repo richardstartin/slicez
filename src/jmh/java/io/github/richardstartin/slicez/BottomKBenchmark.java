@@ -25,50 +25,52 @@ import java.util.concurrent.TimeUnit;
 @Measurement(iterations = 10, time = 1)
 public class BottomKBenchmark {
 
-    @State(Scope.Thread)
-    @AuxCounters(AuxCounters.Type.EVENTS)
-    public static class SliceZState {
-        @Param({"100000000"})
-        int size;
-        @Param({"UNIFORM_1", "UNIFORM_2", "EXP_0_1", "DOUBLES", "SAMPLED_PCS"})
-        DataGenerator data;
-        @Param({"10", "100", "1000"})
-        int k;
+	@State(Scope.Thread)
+	@AuxCounters(AuxCounters.Type.EVENTS)
+	public static class SliceZState {
+		@Param({"100000000"})
+		int size;
+		@Param({"UNIFORM_1", "UNIFORM_2", "EXP_0_1", "DOUBLES", "SAMPLED_PCS"})
+		DataGenerator data;
+		@Param({"10", "100", "1000"})
+		int k;
 
-        SliceZ index;
+		SliceZ index;
 
-        @Setup(Level.Trial)
-        public void setup() {
-            long[] values = data.generate(size);
-            SliceZ.Appender appender = SliceZ.appender();
-            for (long value : values) appender.add(value);
-            index = appender.build();
-        }
+		@Setup(Level.Trial)
+		public void setup() {
+			long[] values = data.generate(size);
+			SliceZ.Appender appender = SliceZ.appender();
+			for (long value : values)
+				appender.add(value);
+			index = appender.build();
+		}
 
-        public int getSparseInvertedCount() {
-            return index.getSparseInvertedSliceCount();
-        }
+		public int getSparseInvertedCount() {
+			return index.getSparseInvertedSliceCount();
+		}
 
-        public int getSparseCount() {
-            return index.getSparseSliceCount();
-        }
+		public int getSparseCount() {
+			return index.getSparseSliceCount();
+		}
 
-        public int getDenseCount() {
-            return index.getDenseSliceCount();
-        }
+		public int getDenseCount() {
+			return index.getDenseSliceCount();
+		}
 
-        public int getFullCount() {
-            return index.getFullSliceCount();
-        }
+		public int getFullCount() {
+			return index.getFullSliceCount();
+		}
 
-        public double getCompressionRatio() {
-            return index.getCompressionRatio();
-        }
-    }
+		public double getCompressionRatio() {
+			return index.getCompressionRatio();
+		}
+	}
 
-    @Benchmark
-    public void sliceZBottomK(SliceZState s, Blackhole bh) {
-        PrimitiveIterator.OfInt it = s.index.bottom(s.k);
-        while (it.hasNext()) bh.consume(it.nextInt());
-    }
+	@Benchmark
+	public void sliceZBottomK(SliceZState s, Blackhole bh) {
+		PrimitiveIterator.OfInt it = s.index.bottom(s.k);
+		while (it.hasNext())
+			bh.consume(it.nextInt());
+	}
 }
