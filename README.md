@@ -49,6 +49,19 @@ count = index.countGreaterThanOrEqual(42L);
 // between(lower, upper) is exclusive on both ends: lower < value < upper
 it = index.between(42L, 1000L);
 count = index.countBetween(42L, 1000L);
+
+// inequality and multi-value match
+it = index.notEqual(42L);
+count = index.countNotEqual(42L);
+it = index.in(1L, 42L, 1000L);
+
+// top-k / bottom-k row IDs (unsigned order; partial when fewer than k rows exist)
+PrimitiveIterator.OfInt top = index.top(10);
+PrimitiveIterator.OfInt bot = index.bottom(10);
+
+// global extrema and row count
+long min = index.min();
+long max = index.max();
 ```
 
 All comparisons use **unsigned** 64-bit order, so values are treated as unsigned longs regardless of sign.
@@ -100,14 +113,14 @@ The practical effect is that all bit positions above the effective value range b
 
 Each slice is assigned one of four storage types based on its cardinality within the block:
 
-| Type | Condition                                     | Payload |
-|---|-----------------------------------------------|---|
-| `FULL` | Every row has the bit set                     | None (2-bit header tag only) |
-| `SPARSE` | Fewer than 4096 rows have the bit set         | `count` (2 B) + sorted row positions (2 B each) |
+| Type | Condition                                     | Payload                                                |
+|---|-----------------------------------------------|--------------------------------------------------------|
+| `FULL` | Every row has the bit set                     | None (2-bit header tag only)                           |
+| `SPARSE` | Fewer than 4096 rows have the bit set         | `count` (2 B) + sorted row positions (2 B each)        |
 | `SPARSE_INVERTED` | Fewer than 4096 rows have the bit **clear** | `count` (2 B) + sorted complement positions (2 B each) |
-| `DENSE` | Otherwise                                     | 1,024-byte flat bitset (16 × 64-bit words) |
+| `DENSE` | Otherwise                                     | 8-KiB flat bitset (1024 × 64-bit words)                |
 
-The block header is 24 bytes: two 64-bit words (`typesHigh`, `typesLow`) encoding the 2-bit type for each of the 64 slices, plus the 64-bit `blockMin`.
+The block header is 32 bytes: two 64-bit words (`typesHigh`, `typesLow`) encoding the 2-bit type for each of the 64 slices, plus the 64-bit `blockMin` and `blockMax`. The min/max pair lets every bound query fast-exit a block whose value range doesn't overlap the threshold — without touching any slice payload.
 
 ### Query evaluation
 
@@ -128,6 +141,10 @@ Due to the `~(v − blockMin)` encoding this correctly evaluates `value ≤ thre
 If a slice would make the result empty, the rest of the block is skipped entirely.
 
 **`between lower, upper`:** Decomposes into `NOT(value ≤ lower − 1) AND (value ≤ upper)`. Two accumulators are maintained in parallel (sharing slice reads where possible) and combined at the end as `~lower_buffer & upper_buffer` via `flipAnd`.
+
+**`top k` / `bottom k`:** Two passes. The first walks block headers only (no payload reads) and keeps a *k*-block heap keyed on `blockMax` (for `top`) or `blockMin` (for `bottom`) — every candidate block is guaranteed to contain at least one row that could rank in the global top/bottom *k*. The second pass processes the candidates in best-first order with a *k*-row heap: each block evaluates the current threshold via `evaluateSingleBoundQueryBlock`, extracts matching rows, and tightens the threshold to the heap's *k*-th-best value so subsequent blocks can short-circuit on `blockMax`/`blockMin` alone. The threshold is treated as an inclusive lower (resp. upper) bound and translated to the strict `>` operator via `threshold − 1`, with a fill fallback when the threshold lands on the unsigned minimum.
+
+The supporting `Heap` is a custom bounded min-heap with parallel `long[] keys` and `T[] values`. Comparisons run on the `long` keys via a `LongComparator` functional interface, and the `values[]` slot tracks its key through every sift, so callers reuse pre-allocated `Block` / `Row` instances rather than allocating per insertion.
 
 ### Slice operations
 

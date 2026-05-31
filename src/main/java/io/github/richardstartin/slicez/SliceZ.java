@@ -541,7 +541,7 @@ public class SliceZ {
 			// when the number of rows are at their densest
 			int[] rowIndex = null;
 			if (!filter.isFull()) {
-				rowIndex = new int[values.length];
+				rowIndex = new int[size];
 				for (int i = 0, r = 0; i < filter.bits.length && r < rowIndex.length; i++) {
 					long word = filter.bits[i];
 					while (word != 0 && r < rowIndex.length) {
@@ -608,7 +608,7 @@ public class SliceZ {
 					}
 				}
 			}
-			for (int i = 0; i < values.length; i++) {
+			for (int i = 0; i < size; i++) {
 				Row row = heap.add(blockMin + ~(fullSlices | values[i]));
 				if (row != null) {
 					row.rid = block.base + (rowIndex == null ? i : rowIndex[i]);
