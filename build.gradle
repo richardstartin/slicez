@@ -1,7 +1,10 @@
 plugins {
     id 'java'
+    id 'maven-publish'
+    id 'signing'
     id 'me.champeau.jmh' version '0.7.3'
     id 'com.diffplug.spotless' version '7.0.4'
+    id 'io.github.gradle-nexus.publish-plugin' version '2.0.0'
 }
 
 spotless {
@@ -12,7 +15,7 @@ spotless {
 }
 
 group = 'io.github.richardstartin'
-version = '0.1.0-SNAPSHOT'
+version = project.findProperty('releaseVersion') ?: '0.1.0-SNAPSHOT'
 
 repositories {
     mavenCentral()
@@ -35,5 +38,63 @@ test {
 jmh {
     if (project.hasProperty('jmhInclude')) {
         includes = [project.property('jmhInclude')]
+    }
+}
+
+java {
+    withJavadocJar()
+    withSourcesJar()
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            pom {
+                name = 'slicez'
+                description = 'Z-layout bit-sliced index for evaluating point and range queries over unsorted numerical data'
+                url = 'https://github.com/richardstartin/slicez'
+                licenses {
+                    license {
+                        name = 'Apache License, Version 2.0'
+                        url = 'https://www.apache.org/licenses/LICENSE-2.0'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'richardstartin'
+                        name = 'Richard Startin'
+                        url = 'https://github.com/richardstartin'
+                    }
+                }
+                scm {
+                    connection = 'scm:git:git://github.com/richardstartin/slicez.git'
+                    developerConnection = 'scm:git:ssh://github.com/richardstartin/slicez.git'
+                    url = 'https://github.com/richardstartin/slicez'
+                }
+            }
+        }
+    }
+}
+
+signing {
+    def signingKey = System.getenv('GPG_SIGNING_KEY')
+    def signingPassword = System.getenv('GPG_SIGNING_PASSWORD')
+    if (signingKey) {
+        useInMemoryPgpKeys(signingKey, signingPassword)
+    }
+    required { signingKey != null }
+    sign publishing.publications.mavenJava
+}
+
+nexusPublishing {
+    repositories {
+        sonatype {
+            // OSSRH compatibility endpoint for the new Central Portal
+            nexusUrl.set(uri('https://ossrh.central.sonatype.com/service/local/'))
+            snapshotRepositoryUrl.set(uri('https://ossrh.central.sonatype.com/content/repositories/snapshots/'))
+            username = providers.environmentVariable('MAVEN_CENTRAL_USERNAME')
+            password = providers.environmentVariable('MAVEN_CENTRAL_PASSWORD')
+        }
     }
 }
