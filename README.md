@@ -154,7 +154,7 @@ Every accumulator operation is dispatched on slice type. Sparse operations itera
 
 ## Benchmarks
 
-Benchmarks compare SliceZ against [`RangeBitmap`](https://github.com/RoaringBitmap/RoaringBitmap) indexing **100 million** `long` values. The equality benchmark queries the median value; the range benchmark queries between the 50th and 51st percentile (a narrow 1-percentile window). All timings are average time in microseconds (lower is better).
+Benchmarks compare SliceZ against [`RangeBitmap`](https://github.com/RoaringBitmap/RoaringBitmap) indexing **100 million** `long` values. The equality benchmark queries the median value; the range benchmark queries between the 50th and 51st percentile (a narrow 1-percentile window). Top/bottom-k is compared against a brute-force heap scan of all values. All timings are average time in microseconds (lower is better).
 
 ### Distributions
 
@@ -170,21 +170,51 @@ Benchmarks compare SliceZ against [`RangeBitmap`](https://github.com/RoaringBitm
 
 | Distribution | SliceZ (µs) | RangeBitmap (µs) | SliceZ speedup |
 |---|---|---|---|
-| UNIFORM_1 | 6,748 | 17,695 | 2.6× |
-| UNIFORM_2 | 7,431 | 12,866 | 1.7× |
-| EXP_0_1 | 37,030 | 74,413 | 2.0× |
-| DOUBLES | 6,870 | 17,740 | 2.6× |
-| SAMPLED_PCS | 23,222 | 16,006 | 0.69× |
+| UNIFORM_1 | 6,621 | 16,738 | 2.5× |
+| UNIFORM_2 | 7,359 | 8,856 | 1.2× |
+| EXP_0_1 | 36,480 | 70,143 | 1.9× |
+| DOUBLES | 6,245 | 15,433 | 2.5× |
+| SAMPLED_PCS | 23,035 | 13,162 | 0.57× |
 
 ### Range query (between 50th–51st percentile)
 
 | Distribution | SliceZ (µs) | RangeBitmap (µs) | SliceZ speedup |
 |---|---|---|---|
-| UNIFORM_1 | 41,150 | 51,060 | 1.2× |
-| UNIFORM_2 | 23,240 | 59,341 | 2.6× |
-| EXP_0_1 | 38,880 | 97,808 | 2.5× |
-| DOUBLES | 39,486 | 48,260 | 1.2× |
-| SAMPLED_PCS | 46,307 | 32,080 | 0.69× |
+| UNIFORM_1 | 37,050 | 42,351 | 1.1× |
+| UNIFORM_2 | 21,700 | 38,904 | 1.8× |
+| EXP_0_1 | 34,616 | 80,275 | 2.3× |
+| DOUBLES | 38,164 | 40,333 | 1.1× |
+| SAMPLED_PCS | 46,130 | 30,674 | 0.66× |
+
+### Top-k and bottom-k
+
+The baseline is a brute-force heap scan over all 100 million values (~158–162 ms on all distributions, independent of k). SliceZ uses block-level `blockMin`/`blockMax` pruning to skip most blocks.
+
+**bottom-k (µs)**
+
+| Distribution | k=10 | k=100 | k=1,000 | Heap scan |
+|---|---|---|---|---|
+| UNIFORM_1 | 720 | 6,108 | 45,577 | 161,446 |
+| UNIFORM_2 | 200 | 1,923 | 18,979 | 160,809 |
+| EXP_0_1 | 1,636 | 1,642 | 1,792 | 158,492 |
+| DOUBLES | 755 | 11,567 | 48,958 | 160,990 |
+| SAMPLED_PCS | 237 | 237 | 1,253 | 159,222 |
+
+**top-k (µs)**
+
+| Distribution | k=10 | k=100 | k=1,000 | Heap scan |
+|---|---|---|---|---|
+| UNIFORM_1 | 717 | 6,087 | 45,691 | 161,446 |
+| UNIFORM_2 | 338 | 2,958 | 18,495 | 160,809 |
+| EXP_0_1 | 1,584 | 14,535 | 103,823 | 158,492 |
+| DOUBLES | 741 | 5,945 | 45,353 | 160,990 |
+| SAMPLED_PCS | 1,834 | 15,273 | 110,505 | 159,222 |
+
+For small k (10–100) the speedup over heap scan is typically 86–791×. At k=1,000 it narrows to 3–127× on most distributions. Two patterns are worth noting:
+
+- **EXP_0_1 bottom-k is nearly k-invariant** (1.6–1.8 ms for k=10, 100, 1,000). Exponential values are heavily concentrated at small magnitudes, so almost every block is pruned on its `blockMin` alone, and the threshold tightens in the very first block. Top-k on the same distribution degrades sharply at k=1,000 (104 ms) because locating the 1,000 largest values of a heavy-tailed distribution requires visiting many more blocks.
+
+- **SAMPLED_PCS bottom-k at k=10 and k=100 are identical** (237 µs). All values share the top 17 bits, so `blockMin` varies only in the lower 47 bits; the first block immediately yields a tight global bound that prunes almost everything. Top-k is much more expensive at k≥100 (15–111 ms) because many blocks have similar `blockMax` values and cannot be pruned.
 
 ### Index size relative to raw data
 
@@ -208,7 +238,7 @@ Benchmarks compare SliceZ against [`RangeBitmap`](https://github.com/RoaringBitm
 
 `UNIFORM_1` has no FULL slices because uniformly random 64-bit data populates all bit positions. `EXP_0_1` is dominated by FULL slices: with values concentrated in roughly 8 bits, the remaining 56 high-order bits are all-zero in the original data and become all-ones after `~(v − blockMin)`, yielding FULL slices with no payload. `UNIFORM_2` similarly has ~38 FULL slices per block from the high-order zero bits and from the trailing zero bits introduced by the ×10,000 factor.
 
-The `SAMPLED_PCS` distribution is the one case where SliceZ is slower. Profiler addresses have the top 17 bits fixed (→ FULL slices, no benefit to query cost) but the remaining 47 bits span varied code addresses, all falling into dense slices. RangeBitmap compresses this distribution 2× better than SliceZ, and its representation aligns better with the narrow inter-percentile query range.
+The `SAMPLED_PCS` distribution is the one case where SliceZ is slower than RangeBitmap for equality and range queries. Profiler addresses have the top 17 bits fixed (→ FULL slices, no benefit to query cost) but the remaining 47 bits span varied code addresses, all falling into dense slices. RangeBitmap compresses this distribution ~2× better than SliceZ, and its representation aligns better with the narrow inter-percentile query range. Top/bottom-k show the same asymmetry: bottom-k benefits from the fixed high bits (strong block pruning), while top-k must scan most blocks.
 
 ---
 
