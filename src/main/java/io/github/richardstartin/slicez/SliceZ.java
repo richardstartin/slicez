@@ -90,9 +90,9 @@ public class SliceZ {
 				} else if (sliceCardinality > blockLimit - SPARSE_THRESHOLD) {
 					typesHigh |= ((SPARSE_INVERTED >>> 1) & 1L) << i;
 					typesLow |= (SPARSE_INVERTED & 1L) << i;
-					sliceStorageSize += (sliceCardinality + 1) * Character.BYTES;
+					sliceStorageSize += (blockLimit - sliceCardinality + 1) * Character.BYTES;
 					counts[SPARSE_INVERTED]++;
-					counts[SPARSE_SIZE] += (1 + sliceCardinality) * Character.BYTES;
+                    counts[SPARSE_SIZE] += (blockLimit - sliceCardinality + 1) * Character.BYTES;
 				} else {
 					typesHigh |= ((DENSE >>> 1) & 1L) << i;
 					typesLow |= (DENSE & 1L) << i;
