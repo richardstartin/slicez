@@ -410,20 +410,18 @@ public class SliceZ {
 
 	private class KTailQuery implements PrimitiveIterator.OfInt {
 
-		private record Block(long delimiter, long min, int offset, int base) implements Comparable<Block> {
+		private static final Heap.LongComparator UNSIGNED_NATURAL = Long::compareUnsigned;
+		private static final Heap.LongComparator UNSIGNED_REVERSE = (a, b) -> Long.compareUnsigned(b, a);
 
-			@Override
-			public int compareTo(Block o) {
-				return Long.compareUnsigned(delimiter, o.delimiter);
-			}
+		private static final class Block {
+			long delimiter;
+			long min;
+			int offset;
+			int base;
 		}
 
-		private record Row(long value, int rid) implements Comparable<Row> {
-
-			@Override
-			public int compareTo(Row o) {
-				return Long.compareUnsigned(value, o.value);
-			}
+		private static final class Row {
+			int rid;
 		}
 
 		private final boolean bottom;
@@ -441,7 +439,7 @@ public class SliceZ {
 		}
 
 		private Heap<Block> findCandidateBlocks(int k) {
-			var blockHeap = new Heap<>(Block.class, bottom ? Comparator.naturalOrder() : Comparator.reverseOrder(), k);
+			var blockHeap = new Heap<>(Block.class, Block::new, bottom ? UNSIGNED_NATURAL : UNSIGNED_REVERSE, k);
 			int position = HEADER_SIZE;
 			int base = 0;
 			while (base < rowCount) {
@@ -455,7 +453,14 @@ public class SliceZ {
 				long blockMax = data.getLong(position);
 				position += Long.BYTES;
 				position = Util.skipBlock(data, position, typesHigh, typesLow);
-				blockHeap.add(new Block(bottom ? blockMin : blockMax, blockMin, blockOffset, base));
+				long delimiter = bottom ? blockMin : blockMax;
+				Block block = blockHeap.add(delimiter);
+				if (block != null) {
+					block.delimiter = delimiter;
+					block.min = blockMin;
+					block.offset = blockOffset;
+					block.base = base;
+				}
 				base += BLOCK_SIZE;
 			}
 			return blockHeap;
@@ -466,11 +471,11 @@ public class SliceZ {
 		}
 
 		private Heap<Row> findTopRows(Heap<Block> blockHeap, int k, Bits buffer) {
-			var resultHeap = new Heap<>(Row.class, Comparator.reverseOrder(), k);
+			var resultHeap = new Heap<>(Row.class, Row::new, UNSIGNED_REVERSE, k);
 			int blockCount = blockHeap.size();
 			if (blockCount != 0) {
 				Block[] blocks = blockHeap.backingArray();
-				Arrays.sort(blocks, 0, blockCount, Comparator.reverseOrder());
+				Arrays.sort(blocks, 0, blockCount, (a, b) -> Long.compareUnsigned(b.delimiter, a.delimiter));
 				long threshold = blockCount < k ? 0L : blocks[blockCount - 1].delimiter;
 				for (int i = 0; i < blockCount; i++) {
 					var block = blocks[i];
@@ -485,7 +490,7 @@ public class SliceZ {
 					}
 					extractValuesToHeap(data, block, buffer, resultHeap, range);
 					if (resultHeap.size() == k) {
-						long bound = resultHeap.tail().value;
+						long bound = resultHeap.tailKey();
 						if (Long.compareUnsigned(bound, threshold) > 0) {
 							threshold = bound;
 						}
@@ -496,16 +501,16 @@ public class SliceZ {
 		}
 
 		private Heap<Row> findBottomRows(Heap<Block> blockHeap, int k, Bits buffer) {
-			var resultHeap = new Heap<>(Row.class, Comparator.naturalOrder(), k);
+			var resultHeap = new Heap<>(Row.class, Row::new, UNSIGNED_NATURAL, k);
 			int blockCount = blockHeap.size();
 			Block[] blocks = blockHeap.backingArray();
-			Arrays.sort(blocks, 0, blockCount, Comparator.naturalOrder());
+			Arrays.sort(blocks, 0, blockCount, (a, b) -> Long.compareUnsigned(a.delimiter, b.delimiter));
 			// fixme review this logic
 			long threshold = blockCount == 1 || blockCount < k ? -1L : blocks[blockCount - 1].delimiter;
 			for (int i = 0; i < blockCount; i++) {
 				var block = blocks[i];
 				if (resultHeap.size() == k) {
-					long bound = resultHeap.tail().value;
+					long bound = resultHeap.tailKey();
 					if (Long.compareUnsigned(bound, threshold) < 0)
 						threshold = bound;
 					if (Long.compareUnsigned(block.delimiter, threshold) >= 0)
@@ -604,14 +609,16 @@ public class SliceZ {
 				}
 			}
 			for (int i = 0; i < values.length; i++) {
-				heap.add(new Row(blockMin + ~(fullSlices | values[i]),
-						block.base + (rowIndex == null ? i : rowIndex[i])));
+				Row row = heap.add(blockMin + ~(fullSlices | values[i]));
+				if (row != null) {
+					row.rid = block.base + (rowIndex == null ? i : rowIndex[i]);
+				}
 			}
 		}
 
 		private Row[] prepareResults(Heap<Row> resultsHeap) {
 			var rows = resultsHeap.backingArray();
-			Arrays.sort(rows, 0, resultsHeap.size(), Comparator.comparingInt(Row::rid));
+			Arrays.sort(rows, 0, resultsHeap.size(), (a, b) -> Integer.compare(a.rid, b.rid));
 			return rows;
 		}
 

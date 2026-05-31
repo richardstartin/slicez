@@ -16,6 +16,7 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.PrimitiveIterator;
 import java.util.concurrent.TimeUnit;
 
@@ -99,21 +100,20 @@ public class KTailBenchmark {
 		}
 	}
 
-	record Row(int id, long value) implements Comparable<Row> {
-
-		@Override
-		public int compareTo(Row o) {
-			return Long.compareUnsigned(value, o.value);
-		}
+	class Row {
+		int id;
 	}
 
-	// @Benchmark
-	public void heapScan(HeapScanState state, Blackhole bh) {
-		var heap = new Heap<>(Row.class, Row::compareTo, state.k);
+	@Benchmark
+	public void heapScanBottomK(HeapScanState state, Blackhole bh) {
+		var heap = new Heap<>(Row.class, Row::new, Long::compareUnsigned, state.k);
 		for (int i = 0; i < state.values.length; i++) {
-			heap.add(new Row(i, state.values[i]));
+			Row row = heap.add(state.values[i]);
+			if (row != null) {
+				row.id = i;
+			}
 		}
-		Arrays.sort(heap.backingArray());
+		Arrays.sort(heap.backingArray(), Comparator.comparingInt(r -> r.id));
 		for (Row row : heap.backingArray()) {
 			bh.consume(row.id);
 		}
