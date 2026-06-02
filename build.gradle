@@ -90,9 +90,9 @@ signing {
 nexusPublishing {
     repositories {
         sonatype {
-            // OSSRH compatibility endpoint for the new Central Portal
-            nexusUrl.set(uri('https://ossrh.central.sonatype.com/service/local/'))
-            snapshotRepositoryUrl.set(uri('https://ossrh.central.sonatype.com/content/repositories/snapshots/'))
+            // OSSRH Staging API compatibility endpoint for the new Central Portal
+            nexusUrl.set(uri('https://ossrh-staging-api.central.sonatype.com/service/local/'))
+            snapshotRepositoryUrl.set(uri('https://central.sonatype.com/repository/maven-snapshots/'))
             username = providers.environmentVariable('MAVEN_CENTRAL_USERNAME')
             password = providers.environmentVariable('MAVEN_CENTRAL_PASSWORD')
         }
