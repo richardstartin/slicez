@@ -14,7 +14,7 @@ Gradle (`build.gradle`):
 
 ```groovy
 dependencies {
-    implementation 'io.github.richardstartin:slicez:latest.release'
+    implementation 'io.github.richardstartin:slicez:0.1.1'
 }
 ```
 
@@ -24,11 +24,9 @@ Maven (`pom.xml`):
 <dependency>
     <groupId>io.github.richardstartin</groupId>
     <artifactId>slicez</artifactId>
-    <version>LATEST</version>
+    <version>0.1.1</version>
 </dependency>
 ```
-
-> Maven resolves `LATEST` only against repositories that expose it, and it is discouraged for reproducible builds. Pin a concrete version from the [Maven Central badge](https://central.sonatype.com/artifact/io.github.richardstartin/slicez) above for production use.
 
 ### Building an index
 
