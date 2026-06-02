@@ -4,6 +4,32 @@ Z-layout bit-sliced index for evaluating point and range queries over unsorted n
 
 ## Usage
 
+### Installation
+
+`slicez` is published to Maven Central as `io.github.richardstartin:slicez`.
+
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.richardstartin/slicez)](https://central.sonatype.com/artifact/io.github.richardstartin/slicez)
+
+Gradle (`build.gradle`):
+
+```groovy
+dependencies {
+    implementation 'io.github.richardstartin:slicez:latest.release'
+}
+```
+
+Maven (`pom.xml`):
+
+```xml
+<dependency>
+    <groupId>io.github.richardstartin</groupId>
+    <artifactId>slicez</artifactId>
+    <version>LATEST</version>
+</dependency>
+```
+
+> Maven resolves `LATEST` only against repositories that expose it, and it is discouraged for reproducible builds. Pin a concrete version from the [Maven Central badge](https://central.sonatype.com/artifact/io.github.richardstartin/slicez) above for production use.
+
 ### Building an index
 
 For a known array of values:
