@@ -3,10 +3,12 @@ package io.github.richardstartin.slicez;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.PrimitiveIterator;
+import java.util.function.DoubleToLongFunction;
 import java.util.function.LongConsumer;
+import java.util.function.LongToDoubleFunction;
 import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 
 public class SliceZ {
 
@@ -395,8 +397,38 @@ public class SliceZ {
 		if (k == 0) {
 			return IntStream.empty().iterator();
 		}
-		return new KTailQuery(k, true);
+		return new KTailRowsIdsQuery(k, true);
 	}
+
+    public PrimitiveIterator.OfLong bottomValues(int k) {
+        if (k < 0) {
+            throw new IllegalArgumentException("bottom-k negative k: " + k);
+        }
+        if (k == 0) {
+            return LongStream.empty().iterator();
+        }
+        return new KTailValuesQuery(k, true);
+    }
+
+    public long bottomSum(int k) {
+        if (k < 0) {
+            throw new IllegalArgumentException("top-k negative k: " + k);
+        }
+        if (k == 0) {
+            return 0L;
+        }
+        return new KTailValuesQuery(k, true).sumLongs();
+    }
+
+    public double bottomSum(int k, LongToDoubleFunction encoding) {
+        if (k < 0) {
+            throw new IllegalArgumentException("bottom-k negative k: " + k);
+        }
+        if (k == 0) {
+            return 0L;
+        }
+        return new KTailValuesQuery(k, true).sumDoubles(encoding);
+    }
 
 	public PrimitiveIterator.OfInt top(int k) {
 		if (k < 0) {
@@ -405,40 +437,56 @@ public class SliceZ {
 		if (k == 0) {
 			return IntStream.empty().iterator();
 		}
-		return new KTailQuery(k, false);
+		return new KTailRowsIdsQuery(k, false);
 	}
 
-	private class KTailQuery implements PrimitiveIterator.OfInt {
+    public PrimitiveIterator.OfLong topValues(int k) {
+        if (k < 0) {
+            throw new IllegalArgumentException("top-k negative k: " + k);
+        }
+        if (k == 0) {
+            return LongStream.empty().iterator();
+        }
+        return new KTailValuesQuery(k, false);
+    }
 
-		private static final Heap.LongComparator UNSIGNED_NATURAL = Long::compareUnsigned;
-		private static final Heap.LongComparator UNSIGNED_REVERSE = (a, b) -> Long.compareUnsigned(b, a);
+    public long topSum(int k) {
+        if (k < 0) {
+            throw new IllegalArgumentException("top-k negative k: " + k);
+        }
+        if (k == 0) {
+            return 0L;
+        }
+        return new KTailValuesQuery(k, false).sumLongs();
+    }
 
-		private static final class Block {
+    public double topSum(int k, LongToDoubleFunction encoding) {
+        if (k < 0) {
+            throw new IllegalArgumentException("top-k negative k: " + k);
+        }
+        if (k == 0) {
+            return 0L;
+        }
+        return new KTailValuesQuery(k, false).sumDoubles(encoding);
+    }
+
+	protected class KTailQuery {
+
+		static final Heap.LongComparator UNSIGNED_NATURAL = Long::compareUnsigned;
+		static final Heap.LongComparator UNSIGNED_REVERSE = (a, b) -> Long.compareUnsigned(b, a);
+
+		protected static final class Block {
 			long delimiter;
 			long min;
 			int offset;
 			int base;
 		}
 
-		private static final class Row {
+		protected static final class Row {
 			int rid;
 		}
 
-		private final boolean bottom;
-		private final Row[] rows;
-		private final int resultCount;
-
-		private int it;
-
-		private KTailQuery(int k, boolean bottom) {
-			this.bottom = bottom;
-			var blockHeap = findCandidateBlocks(k);
-			var resultsHeap = findRows(blockHeap, k, new Bits());
-			this.resultCount = resultsHeap.size();
-			this.rows = prepareResults(resultsHeap);
-		}
-
-		private Heap<Block> findCandidateBlocks(int k) {
+		protected Heap<Block> findCandidateBlocks(int k, boolean bottom) {
 			var blockHeap = new Heap<>(Block.class, Block::new, bottom ? UNSIGNED_NATURAL : UNSIGNED_REVERSE, k);
 			int position = HEADER_SIZE;
 			int base = 0;
@@ -466,11 +514,11 @@ public class SliceZ {
 			return blockHeap;
 		}
 
-		private Heap<Row> findRows(Heap<Block> blockHeap, int k, Bits buffer) {
+		protected Heap<Row> findRows(Heap<Block> blockHeap, int k, boolean bottom, Bits buffer) {
 			return bottom ? findBottomRows(blockHeap, k, buffer) : findTopRows(blockHeap, k, buffer);
 		}
 
-		private Heap<Row> findTopRows(Heap<Block> blockHeap, int k, Bits buffer) {
+		protected Heap<Row> findTopRows(Heap<Block> blockHeap, int k, Bits buffer) {
 			var resultHeap = new Heap<>(Row.class, Row::new, UNSIGNED_REVERSE, k);
 			int blockCount = blockHeap.size();
 			if (blockCount != 0) {
@@ -486,7 +534,7 @@ public class SliceZ {
 					if (threshold == 0L) {
 						buffer.fill(range);
 					} else {
-						evaluateSingleBoundQueryBlock(data, block.offset, range, buffer, threshold - 1, bottom);
+						evaluateSingleBoundQueryBlock(data, block.offset, range, buffer, threshold - 1, false);
 					}
 					extractValuesToHeap(data, block, buffer, resultHeap, range);
 					if (resultHeap.size() == k) {
@@ -500,7 +548,7 @@ public class SliceZ {
 			return resultHeap;
 		}
 
-		private Heap<Row> findBottomRows(Heap<Block> blockHeap, int k, Bits buffer) {
+		protected Heap<Row> findBottomRows(Heap<Block> blockHeap, int k, Bits buffer) {
 			var resultHeap = new Heap<>(Row.class, Row::new, UNSIGNED_NATURAL, k);
 			int blockCount = blockHeap.size();
 			Block[] blocks = blockHeap.backingArray();
@@ -517,13 +565,13 @@ public class SliceZ {
 						break;
 				}
 				int range = Math.min(rowCount - block.base, BLOCK_SIZE);
-				evaluateSingleBoundQueryBlock(data, block.offset, range, buffer, threshold, bottom);
+				evaluateSingleBoundQueryBlock(data, block.offset, range, buffer, threshold, true);
 				extractValuesToHeap(data, block, buffer, resultHeap, range);
 			}
 			return resultHeap;
 		}
 
-		private void extractValuesToHeap(ByteBuffer data, Block block, Bits filter, Heap<Row> heap, int range) {
+		protected void extractValuesToHeap(ByteBuffer data, Block block, Bits filter, Heap<Row> heap, int range) {
 			int position = block.offset;
 			long typesHigh = data.getLong(position);
 			position += Long.BYTES;
@@ -615,23 +663,80 @@ public class SliceZ {
 				}
 			}
 		}
-
-		private Row[] prepareResults(Heap<Row> resultsHeap) {
-			var rows = resultsHeap.backingArray();
-			Arrays.sort(rows, 0, resultsHeap.size(), (a, b) -> Integer.compare(a.rid, b.rid));
-			return rows;
-		}
-
-		@Override
-		public int nextInt() {
-			return rows[it++].rid;
-		}
-
-		@Override
-		public boolean hasNext() {
-			return it < resultCount;
-		}
 	}
+
+    protected class KTailRowsIdsQuery extends KTailQuery implements PrimitiveIterator.OfInt {
+
+        private final Row[] rows;
+        private final int resultCount;
+
+        private int it;
+
+        private KTailRowsIdsQuery(int k, boolean bottom) {
+            super();
+            var blockHeap = findCandidateBlocks(k, bottom);
+            var resultsHeap = findRows(blockHeap, k, bottom, new Bits());
+            this.resultCount = resultsHeap.size();
+            this.rows = prepareResults(resultsHeap);
+        }
+
+        private Row[] prepareResults(Heap<Row> resultsHeap) {
+            var rows = resultsHeap.backingArray();
+            Arrays.sort(rows, 0, resultsHeap.size(), (a, b) -> Integer.compare(a.rid, b.rid));
+            return rows;
+        }
+
+        @Override
+        public int nextInt() {
+            return rows[it++].rid;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return it < resultCount;
+        }
+    }
+
+    protected class KTailValuesQuery extends KTailQuery implements PrimitiveIterator.OfLong {
+
+        private final Heap<?> values;
+        private final int size;
+
+        private KTailValuesQuery(int k, boolean bottom) {
+            super();
+            var blockHeap = findCandidateBlocks(k, bottom);
+            this.values = findRows(blockHeap, k, bottom, new Bits());
+            this.size = values.size();
+        }
+
+        @Override
+        public long nextLong() {
+            return values.pollKey();
+        }
+
+        @Override
+        public boolean hasNext() {
+            return !values.isEmpty();
+        }
+
+        public long sumLongs() {
+            long[] keys = values.backingKeys();
+            long sum = 0L;
+            for (int i = 0; i < size; i++) {
+                sum += keys[i];
+            }
+            return sum;
+        }
+
+        public double sumDoubles(LongToDoubleFunction encoding) {
+            long[] keys = values.backingKeys();
+            double sum = 0D;
+            for (int i = 0; i < size; i++) {
+                sum += encoding.applyAsDouble(keys[i]);
+            }
+            return sum;
+        }
+    }
 
 	protected abstract class BaseQuery implements PrimitiveIterator.OfInt {
 		protected final Bits buffer = new Bits();

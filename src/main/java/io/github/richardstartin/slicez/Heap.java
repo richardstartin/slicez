@@ -91,24 +91,37 @@ class Heap<T> {
 		return values;
 	}
 
-	long[] backingKeys() {
-		return keys;
-	}
+    long[] backingKeys() {
+        return keys;
+    }
 
 	public T peek() {
 		return values[0];
 	}
 
+    public long pollKey() {
+        T value = values[0];
+        long key = keys[0];
+        if (--size > 0) {
+            values[0] = values[size];
+            keys[0] = keys[size];
+            // park the polled instance at the just-vacated slot so the next add() can reuse
+            // it
+            values[size] = value;
+            keys[size] = key;
+            siftDown(0);
+        }
+        return key;
+    }
+
 	public T poll() {
 		T value = values[0];
-		long key = keys[0];
 		if (--size > 0) {
 			values[0] = values[size];
 			keys[0] = keys[size];
 			// park the polled instance at the just-vacated slot so the next add() can reuse
 			// it
 			values[size] = value;
-			keys[size] = key;
 			siftDown(0);
 		}
 		return value;
