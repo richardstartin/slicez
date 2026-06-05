@@ -1013,7 +1013,7 @@ class TestSliceZ {
 	void countBetweenLowerZeroExcludesUpperBound() {
 		// between(lower, upper) is exclusive-upper: lower ≤ v < upper.
 		// between(0, upper) delegates to lessThan(upper) = v < upper.
-		// countBetween(0, upper) delegates to countLessThanOrEqual(upper) = count(v ≤
+		// countBetween(0, upper) delegates to countLessThan(upper) = count(v ≤
 		// upper).
 		// When upper is in the index, countBetween overcounts by the number of rows ==
 		// upper.

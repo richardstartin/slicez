@@ -3,7 +3,7 @@ package io.github.richardstartin.slicez;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
-public class Util {
+class Util {
 	static int skipBlock(ByteBuffer data, int position, long typesHigh, long typesLow) {
 		long storedSlices = ~(typesHigh & typesLow);
 		while (storedSlices != 0) {

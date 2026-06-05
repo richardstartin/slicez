@@ -3,12 +3,30 @@ package io.github.richardstartin.slicez;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
+import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
 import java.util.function.LongConsumer;
 import java.util.function.LongToDoubleFunction;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 
+/**
+ * A Z-layout bit-sliced index for evaluating point, range, and k-tail
+ * (top/bottom) queries over unsorted numerical data.
+ *
+ * <p>
+ * All values are treated as unsigned 64-bit integers and every comparison uses
+ * unsigned order ({@link Long#compareUnsigned}). Floating-point data can be
+ * indexed by first mapping each value to a sortable {@code long}. The index is
+ * immutable once built; construct one with {@link #build(long...)} or via an
+ * {@link Appender}.
+ *
+ * <p>
+ * Query methods come in two flavours: those returning a
+ * {@link PrimitiveIterator.OfInt} yield the matching row ids in ascending
+ * order, while the {@code count*} variants return only the number of matches
+ * without materializing them.
+ */
 public class SliceZ {
 
 	static final int SPARSE_INVERTED = 0;
@@ -30,6 +48,16 @@ public class SliceZ {
 	static final int BLOCK_WORDS = BLOCK_SIZE / Long.SIZE; // 16
 	private static final int SPARSE_THRESHOLD = BLOCK_SIZE / Short.SIZE - 1;
 
+	/**
+	 * Accumulates values in insertion order and produces an immutable
+	 * {@link SliceZ}.
+	 *
+	 * <p>
+	 * Each appended value is assigned the next row id, starting from {@code 0}.
+	 * Values are treated as unsigned. Rows are encoded in blocks as they fill up;
+	 * the index is finalized when the appender is built. An {@code Appender} is not
+	 * thread-safe and should not be reused after building.
+	 */
 	public static final class Appender implements LongConsumer {
 
 		private final long[] values = new long[BLOCK_SIZE];
@@ -42,6 +70,13 @@ public class SliceZ {
 		private long max = 0L;
 		private final int[] counts = new int[NUM_COUNTS];
 
+		/**
+		 * Appends {@code value} at the next row id, in insertion order. The value is
+		 * treated as an unsigned 64-bit integer.
+		 *
+		 * @param value
+		 *            the value to index
+		 */
 		public void add(long value) {
 			blockMin = unsignedMin(value, blockMin);
 			blockMax = unsignedMax(value, blockMax);
@@ -55,7 +90,16 @@ public class SliceZ {
 			rid++;
 		}
 
-		public void flush(int blockLimit) {
+		/**
+		 * Encodes any buffered rows that have not yet been written into a block. This
+		 * is invoked automatically by {@code build()} and is not normally called
+		 * directly.
+		 */
+		public void flush() {
+			flush(rid);
+		}
+
+		void flush(int blockLimit) {
 			// subtract delimiter to reduce the number of populated slices, figure out
 			// required slice types. this also conflates empty and full slices, allowing for
 			// more non-trivial storage types with a 2-bit/slice type header overhead
@@ -208,12 +252,24 @@ public class SliceZ {
 			return Long.compareUnsigned(x, y) > 0 ? x : y;
 		}
 
+		/**
+		 * Equivalent to {@link #add(long)}; lets an {@code Appender} be used wherever a
+		 * {@link LongConsumer} is expected (for example as a {@link LongStream} sink).
+		 *
+		 * @param value
+		 *            the value to index
+		 */
 		@Override
 		public void accept(long value) {
 			add(value);
 		}
 	}
 
+	/**
+	 * Creates a new empty {@link Appender}.
+	 *
+	 * @return a fresh appender
+	 */
 	public static Appender appender() {
 		return new Appender();
 	}
@@ -223,6 +279,13 @@ public class SliceZ {
 	private final int rowCount;
 	private final ByteBuffer data;
 
+	/**
+	 * Builds an index over the given values, assigning row ids in argument order.
+	 *
+	 * @param values
+	 *            the values to index, treated as unsigned
+	 * @return an immutable index over {@code values}
+	 */
 	public static SliceZ build(long... values) {
 		var appender = appender();
 		for (long value : values) {
@@ -231,7 +294,7 @@ public class SliceZ {
 		return appender.build();
 	}
 
-	public SliceZ(ByteBuffer data) {
+	SliceZ(ByteBuffer data) {
 		this.data = data;
 		int cookie = data.getInt(0);
 		if (cookie != COOKIE) {
@@ -243,26 +306,53 @@ public class SliceZ {
 		this.max = data.getLong(16);
 	}
 
+	/**
+	 * @return the total number of {@code SPARSE_INVERTED} slices across all blocks,
+	 *         each storing the sorted positions of its unset bits
+	 */
 	public int getSparseInvertedSliceCount() {
 		return getCount(SPARSE_INVERTED);
 	}
 
+	/**
+	 * @return the total number of {@code SPARSE} slices across all blocks, each
+	 *         storing the sorted positions of its set bits
+	 */
 	public int getSparseSliceCount() {
 		return getCount(SPARSE);
 	}
 
+	/**
+	 * @return the total number of {@code DENSE} slices across all blocks, each
+	 *         stored as a full bitset
+	 */
 	public int getDenseSliceCount() {
 		return getCount(DENSE);
 	}
 
+	/**
+	 * @return the total number of {@code FULL} slices across all blocks, which
+	 *         carry no payload
+	 */
 	public int getFullSliceCount() {
 		return getCount(FULL);
 	}
 
+	/**
+	 * @return the number of blocks the index is partitioned into; each block holds
+	 *         up to 65536 rows
+	 */
 	public int getBlockCount() {
 		return getCount(BLOCK_COUNT);
 	}
 
+	/**
+	 * Returns the index size relative to the uncompressed input, where the
+	 * uncompressed size is taken as 8 bytes per row.
+	 *
+	 * @return the encoded size divided by {@code 8 * rowCount}; values below
+	 *         {@code 1.0} indicate compression
+	 */
 	public double getCompressionRatio() {
 		double uncompressed = 8d * rowCount;
 		double overhead = getBlockCount() * BLOCK_HEADER_SIZE + HEADER_SIZE;
@@ -275,14 +365,35 @@ public class SliceZ {
 		return data.getInt(24 + offset * Integer.BYTES);
 	}
 
+	/**
+	 * Finds the rows whose value is strictly less than {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive upper bound
+	 * @return the matching row ids in ascending order
+	 */
 	public PrimitiveIterator.OfInt lessThan(long value) {
 		return value == 0L ? IntStream.empty().iterator() : lessThanOrEqual(value - 1);
 	}
 
+	/**
+	 * Counts the rows whose value is strictly less than {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive upper bound
+	 * @return the number of matching rows
+	 */
 	public int countLessThan(long value) {
 		return value == 0L ? 0 : countLessThanOrEqual(value - 1);
 	}
 
+	/**
+	 * Finds the rows whose value is less than or equal to {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive upper bound
+	 * @return the matching row ids in ascending order
+	 */
 	public PrimitiveIterator.OfInt lessThanOrEqual(long value) {
 		if (Long.compareUnsigned(value, min) < 0) {
 			return IntStream.empty().iterator();
@@ -293,6 +404,14 @@ public class SliceZ {
 		return new SingleBoundQuery(value, true);
 	}
 
+	/**
+	 * Counts the rows whose value is less than or equal to {@code value}
+	 * (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive upper bound
+	 * @return the number of matching rows
+	 */
 	public int countLessThanOrEqual(long value) {
 		if (Long.compareUnsigned(value, min) < 0) {
 			return 0;
@@ -303,6 +422,13 @@ public class SliceZ {
 		return new SingleBoundQuery(value, true).matchingCount();
 	}
 
+	/**
+	 * Finds the rows whose value is strictly greater than {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive lower bound
+	 * @return the matching row ids in ascending order
+	 */
 	public PrimitiveIterator.OfInt greaterThan(long value) {
 		if (Long.compareUnsigned(value, min) < 0) {
 			return IntStream.range(0, rowCount).iterator();
@@ -313,6 +439,14 @@ public class SliceZ {
 		return new SingleBoundQuery(value, false);
 	}
 
+	/**
+	 * Counts the rows whose value is strictly greater than {@code value}
+	 * (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive lower bound
+	 * @return the number of matching rows
+	 */
 	public int countGreaterThan(long value) {
 		if (Long.compareUnsigned(value, min) < 0) {
 			return rowCount;
@@ -323,22 +457,62 @@ public class SliceZ {
 		return new SingleBoundQuery(value, false).matchingCount();
 	}
 
+	/**
+	 * Finds the rows whose value is greater than or equal to {@code value}
+	 * (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive lower bound
+	 * @return the matching row ids in ascending order
+	 */
 	public PrimitiveIterator.OfInt greaterThanOrEqual(long value) {
 		return value == 0L ? IntStream.range(0, rowCount).iterator() : greaterThan(value - 1);
 	}
 
+	/**
+	 * Counts the rows whose value is greater than or equal to {@code value}
+	 * (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive lower bound
+	 * @return the number of matching rows
+	 */
 	public int countGreaterThanOrEqual(long value) {
 		return value == 0L ? rowCount : countGreaterThan(value - 1);
 	}
 
+	/**
+	 * Finds the rows whose value equals {@code value}.
+	 *
+	 * @param value
+	 *            the value to match
+	 * @return the matching row ids in ascending order
+	 */
 	public PrimitiveIterator.OfInt equal(long value) {
 		return new EqualityQuery(value, false);
 	}
 
+	/**
+	 * Finds the rows whose value does not equal {@code value}.
+	 *
+	 * @param value
+	 *            the value to exclude
+	 * @return the matching row ids in ascending order
+	 */
 	public PrimitiveIterator.OfInt notEqual(long value) {
 		return new EqualityQuery(value, true);
 	}
 
+	/**
+	 * Finds the rows whose value equals any of the given {@code values} (set
+	 * membership).
+	 *
+	 * @param values
+	 *            the values to match; duplicates and ordering do not affect the
+	 *            result
+	 * @return the matching row ids in ascending order, empty if {@code values} is
+	 *         empty
+	 */
 	public PrimitiveIterator.OfInt in(long... values) {
 		if (values.length == 0) {
 			return IntStream.empty().iterator();
@@ -349,14 +523,40 @@ public class SliceZ {
 		return new InQuery(values);
 	}
 
+	/**
+	 * Counts the rows whose value equals {@code value}.
+	 *
+	 * @param value
+	 *            the value to match
+	 * @return the number of matching rows
+	 */
 	public int countEqual(long value) {
 		return new EqualityQuery(value, false).matchingCount();
 	}
 
+	/**
+	 * Counts the rows whose value does not equal {@code value}.
+	 *
+	 * @param value
+	 *            the value to exclude
+	 * @return the number of matching rows
+	 */
 	public int countNotEqual(long value) {
 		return new EqualityQuery(value, true).matchingCount();
 	}
 
+	/**
+	 * Finds the rows whose value lies in the half-open unsigned range
+	 * {@code [lower, upper)} — that is, {@code lower <= v < upper} in unsigned
+	 * order. The lower bound is inclusive and the upper bound is exclusive.
+	 *
+	 * @param lower
+	 *            the inclusive lower bound
+	 * @param upper
+	 *            the exclusive upper bound
+	 * @return the matching row ids in ascending order, empty if {@code upper} is
+	 *         less than or equal to {@code lower} in unsigned order
+	 */
 	public PrimitiveIterator.OfInt between(long lower, long upper) {
 		if (Long.compareUnsigned(upper, min) < 0 || Long.compareUnsigned(max, lower) < 0) {
 			return IntStream.empty().iterator();
@@ -370,6 +570,17 @@ public class SliceZ {
 		return new BetweenQuery(lower - 1, upper - 1);
 	}
 
+	/**
+	 * Counts the rows whose value lies in the half-open unsigned range
+	 * {@code [lower, upper)} — that is, {@code lower <= v < upper} in unsigned
+	 * order. The lower bound is inclusive and the upper bound is exclusive.
+	 *
+	 * @param lower
+	 *            the inclusive lower bound
+	 * @param upper
+	 *            the exclusive upper bound
+	 * @return the number of matching rows
+	 */
 	public int countBetween(long lower, long upper) {
 		if (lower == 0L) {
 			return countLessThan(upper);
@@ -377,14 +588,33 @@ public class SliceZ {
 		return new BetweenQuery(lower - 1, upper - 1).matchingCount();
 	}
 
+	/**
+	 * @return the largest indexed value in unsigned order, or {@code 0} if the
+	 *         index is empty
+	 */
 	public long max() {
 		return max;
 	}
 
+	/**
+	 * @return the smallest indexed value in unsigned order, or {@code -1} (unsigned
+	 *         maximum) if the index is empty
+	 */
 	public long min() {
 		return min;
 	}
 
+	/**
+	 * Finds the row ids of the {@code k} smallest values in unsigned order. Fewer
+	 * than {@code k} are returned only when the index has fewer rows. When several
+	 * rows share the boundary value, which of them are returned is unspecified.
+	 *
+	 * @param k
+	 *            the number of rows to select
+	 * @return the row ids of the bottom-{@code k} values, in ascending row-id order
+	 * @throws IllegalArgumentException
+	 *             if {@code k} is negative
+	 */
 	public PrimitiveIterator.OfInt bottom(int k) {
 		if (k < 0) {
 			throw new IllegalArgumentException("bottom-k negative k: " + k);
@@ -395,6 +625,17 @@ public class SliceZ {
 		return new KTailRowsIdsQuery(k, true);
 	}
 
+	/**
+	 * Returns the {@code k} smallest values in unsigned order. This is consistent
+	 * with {@link #bottom(int)}: it selects the same rows but yields their values
+	 * rather than their row ids.
+	 *
+	 * @param k
+	 *            the number of values to select
+	 * @return the bottom-{@code k} values
+	 * @throws IllegalArgumentException
+	 *             if {@code k} is negative
+	 */
 	public PrimitiveIterator.OfLong bottomValues(int k) {
 		if (k < 0) {
 			throw new IllegalArgumentException("bottom-k negative k: " + k);
@@ -405,6 +646,18 @@ public class SliceZ {
 		return new KTailValuesQuery(k, true);
 	}
 
+	/**
+	 * Sums the {@code k} smallest values in unsigned order. The sum is computed
+	 * with wrapping {@code long} arithmetic over the same values
+	 * {@link #bottomValues(int)} would return.
+	 *
+	 * @param k
+	 *            the number of values to sum
+	 * @return the sum of the bottom-{@code k} values, or {@code 0} if {@code k} is
+	 *         zero
+	 * @throws IllegalArgumentException
+	 *             if {@code k} is negative
+	 */
 	public long bottomSum(int k) {
 		if (k < 0) {
 			throw new IllegalArgumentException("top-k negative k: " + k);
@@ -415,6 +668,21 @@ public class SliceZ {
 		return new KTailValuesQuery(k, true).sumLongs();
 	}
 
+	/**
+	 * Sums {@code encoding} applied to each of the {@code k} smallest values in
+	 * unsigned order. Useful when values are sortable {@code long} encodings of
+	 * another domain (for example doubles), letting the decoded magnitudes be
+	 * summed.
+	 *
+	 * @param k
+	 *            the number of values to sum
+	 * @param encoding
+	 *            maps each selected value to the {@code double} that is summed
+	 * @return the sum of {@code encoding} over the bottom-{@code k} values, or
+	 *         {@code 0} if {@code k} is zero
+	 * @throws IllegalArgumentException
+	 *             if {@code k} is negative
+	 */
 	public double bottomSum(int k, LongToDoubleFunction encoding) {
 		if (k < 0) {
 			throw new IllegalArgumentException("bottom-k negative k: " + k);
@@ -425,6 +693,17 @@ public class SliceZ {
 		return new KTailValuesQuery(k, true).sumDoubles(encoding);
 	}
 
+	/**
+	 * Finds the row ids of the {@code k} largest values in unsigned order. Fewer
+	 * than {@code k} are returned only when the index has fewer rows. When several
+	 * rows share the boundary value, which of them are returned is unspecified.
+	 *
+	 * @param k
+	 *            the number of rows to select
+	 * @return the row ids of the top-{@code k} values, in ascending row-id order
+	 * @throws IllegalArgumentException
+	 *             if {@code k} is negative
+	 */
 	public PrimitiveIterator.OfInt top(int k) {
 		if (k < 0) {
 			throw new IllegalArgumentException("top-k negative k: " + k);
@@ -435,6 +714,17 @@ public class SliceZ {
 		return new KTailRowsIdsQuery(k, false);
 	}
 
+	/**
+	 * Returns the {@code k} largest values in unsigned order. This is consistent
+	 * with {@link #top(int)}: it selects the same rows but yields their values
+	 * rather than their row ids.
+	 *
+	 * @param k
+	 *            the number of values to select
+	 * @return the top-{@code k} values
+	 * @throws IllegalArgumentException
+	 *             if {@code k} is negative
+	 */
 	public PrimitiveIterator.OfLong topValues(int k) {
 		if (k < 0) {
 			throw new IllegalArgumentException("top-k negative k: " + k);
@@ -445,6 +735,18 @@ public class SliceZ {
 		return new KTailValuesQuery(k, false);
 	}
 
+	/**
+	 * Sums the {@code k} largest values in unsigned order. The sum is computed with
+	 * wrapping {@code long} arithmetic over the same values {@link #topValues(int)}
+	 * would return.
+	 *
+	 * @param k
+	 *            the number of values to sum
+	 * @return the sum of the top-{@code k} values, or {@code 0} if {@code k} is
+	 *         zero
+	 * @throws IllegalArgumentException
+	 *             if {@code k} is negative
+	 */
 	public long topSum(int k) {
 		if (k < 0) {
 			throw new IllegalArgumentException("top-k negative k: " + k);
@@ -455,6 +757,21 @@ public class SliceZ {
 		return new KTailValuesQuery(k, false).sumLongs();
 	}
 
+	/**
+	 * Sums {@code encoding} applied to each of the {@code k} largest values in
+	 * unsigned order. Useful when values are sortable {@code long} encodings of
+	 * another domain (for example doubles), letting the decoded magnitudes be
+	 * summed.
+	 *
+	 * @param k
+	 *            the number of values to sum
+	 * @param encoding
+	 *            maps each selected value to the {@code double} that is summed
+	 * @return the sum of {@code encoding} over the top-{@code k} values, or
+	 *         {@code 0} if {@code k} is zero
+	 * @throws IllegalArgumentException
+	 *             if {@code k} is negative
+	 */
 	public double topSum(int k, LongToDoubleFunction encoding) {
 		if (k < 0) {
 			throw new IllegalArgumentException("top-k negative k: " + k);
