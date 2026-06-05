@@ -25,11 +25,12 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>
  * {@code bottomSum(k)} / {@code topSum(k)} must return the long sum of exactly
- * the same values that {@link SliceZ#bottomValues(int)} / {@link SliceZ#topValues(int)}
- * would yield. The encoded overloads must return the sum of
- * {@code encoding.applyAsDouble(value)} over those same values. Since the values
- * selected are a fixed multiset (tiebreaking among equal boundary values does not
- * affect the sum), the references below are order-independent.
+ * the same values that {@link SliceZ#bottomValues(int)} /
+ * {@link SliceZ#topValues(int)} would yield. The encoded overloads must return
+ * the sum of {@code encoding.applyAsDouble(value)} over those same values.
+ * Since the values selected are a fixed multiset (tiebreaking among equal
+ * boundary values does not affect the sum), the references below are
+ * order-independent.
  */
 @Execution(ExecutionMode.CONCURRENT)
 class TestBottomKSum {
@@ -83,12 +84,13 @@ class TestBottomKSum {
 
 	/**
 	 * Tolerance for a naive sequential sum of {@code n} terms whose absolute values
-	 * total {@code operandMagnitude}. The forward error of left-to-right summation is
-	 * bounded by {@code (n-1) * u * Σ|termᵢ|} where {@code u} is the unit roundoff;
-	 * because addition is non-associative, the implementation and the reference may
-	 * accumulate the same multiset in different orders, so the tolerance must scale
-	 * with the operand magnitudes (which can dwarf the result under cancellation)
-	 * rather than the result. A safety factor and a small absolute floor are added.
+	 * total {@code operandMagnitude}. The forward error of left-to-right summation
+	 * is bounded by {@code (n-1) * u * Σ|termᵢ|} where {@code u} is the unit
+	 * roundoff; because addition is non-associative, the implementation and the
+	 * reference may accumulate the same multiset in different orders, so the
+	 * tolerance must scale with the operand magnitudes (which can dwarf the result
+	 * under cancellation) rather than the result. A safety factor and a small
+	 * absolute floor are added.
 	 */
 	private static double tolerance(double operandMagnitude, int n) {
 		double unitRoundoff = Math.ulp(1.0) / 2; // 2^-53
@@ -139,7 +141,8 @@ class TestBottomKSum {
 				"topSum(encoding) inconsistent with topValues for k=" + k);
 	}
 
-	// A couple of arbitrary value->double encodings to exercise the encoded overloads.
+	// A couple of arbitrary value->double encodings to exercise the encoded
+	// overloads.
 	private static final LongToDoubleFunction IDENTITY = v -> (double) v;
 	private static final LongToDoubleFunction AFFINE = v -> v * 0.25 + 1.0;
 
@@ -239,7 +242,8 @@ class TestBottomKSum {
 
 	@Test
 	void bottomSumPlusTopSumCoversTotalWhenKPartitions() {
-		// For disjoint partition (no shared boundary rows), bottomSum(k)+topSum(n-k) == total.
+		// For disjoint partition (no shared boundary rows), bottomSum(k)+topSum(n-k) ==
+		// total.
 		long[] data = LongStream.range(0, 100).toArray(); // all distinct
 		var idx = build(data);
 		long total = sumLongs(data);
@@ -345,7 +349,8 @@ class TestBottomKSum {
 
 	/**
 	 * Realistic use case: doubles encoded to order-preserving sortable longs, then
-	 * the sum of the decoded top/bottom-k doubles is recovered via the encoding overload.
+	 * the sum of the decoded top/bottom-k doubles is recovered via the encoding
+	 * overload.
 	 */
 	@Test
 	void sumOfDecodedDoubles() {

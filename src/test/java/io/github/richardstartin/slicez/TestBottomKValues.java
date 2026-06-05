@@ -82,8 +82,9 @@ class TestBottomKValues {
 	}
 
 	/**
-	 * Assert that bottomValues(k) returns the right count, that the values sorted by
-	 * unsigned order equal reference(data, k), and that it agrees with bottom(k).
+	 * Assert that bottomValues(k) returns the right count, that the values sorted
+	 * by unsigned order equal reference(data, k), and that it agrees with
+	 * bottom(k).
 	 */
 	private static void assertBottomKValues(long[] data, int k) {
 		var idx = build(data);
@@ -233,8 +234,8 @@ class TestBottomKValues {
 		long[] all = referenceTopK(data, data.length);
 		for (int k = 1; k <= data.length; k++) {
 			long[] values = collect(idx.topValues(k));
-			assertArrayEquals(Arrays.copyOfRange(all, Math.max(0, all.length - k), all.length),
-					sortedUnsigned(values), "suffix mismatch at k=" + k);
+			assertArrayEquals(Arrays.copyOfRange(all, Math.max(0, all.length - k), all.length), sortedUnsigned(values),
+					"suffix mismatch at k=" + k);
 		}
 	}
 
