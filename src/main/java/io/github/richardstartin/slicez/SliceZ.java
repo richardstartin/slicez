@@ -4,7 +4,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.PrimitiveIterator;
-import java.util.function.DoubleToLongFunction;
 import java.util.function.LongConsumer;
 import java.util.function.LongToDoubleFunction;
 import java.util.stream.IntStream;
@@ -58,12 +57,9 @@ public class SliceZ {
 
 		public void flush(int blockLimit) {
 			// subtract delimiter to reduce the number of populated slices, figure out
-			// required slice types
-			// this also conflates empty and full slices, allowing for more non-trivial
-			// storage types with
-			// a 2-bit/slice type header overhead
+			// required slice types. this also conflates empty and full slices, allowing for
+			// more non-trivial storage types with a 2-bit/slice type header overhead
 			for (int i = 0; i < blockLimit; i++) {
-				// FIXME needs to be unsigned - is this correct?
 				values[i] = ~(values[i] - blockMin);
 				long value = values[i];
 				while (value != 0) {
@@ -115,12 +111,7 @@ public class SliceZ {
 				storedSlicesMask &= (storedSlicesMask - 1);
 				if ((sparseSlicesMask & (1L << bit)) != 0) {
 					// for sparse slices, translate the bitset into a sorted array
-					output.putChar((char) sliceCardinalities[bit]);
-					for (int i = 0; i < blockLimit; i++) {
-						if (((values[i] >>> bit) & 1L) == 1L) {
-							output.putChar((char) i);
-						}
-					}
+					storeSparseValues((char) sliceCardinalities[bit], blockLimit, bit, false);
 				} else if ((denseSlicesMask & (1L << bit)) != 0) {
 					int position = output.position();
 					for (int i = 0; i < blockLimit; i += Long.SIZE) {
@@ -135,17 +126,7 @@ public class SliceZ {
 				} else if ((sparseInvertedSlicesMask & (1L << bit)) != 0) {
 					// translate the bitset into a sorted array similarly to sparse slices, just
 					// invert the check
-					// fixme - this code could be mostly shared
-					output.putChar((char) (blockLimit - sliceCardinalities[bit]));
-					int added = 0;
-					for (int i = 0; i < blockLimit; i++) {
-						if (((values[i] >>> bit) & 1L) == 0L) {
-							output.putChar((char) i);
-							added++;
-						}
-					}
-					assert !(added < blockLimit - sliceCardinalities[bit]) : "underflow";
-					assert !(added > blockLimit - sliceCardinalities[bit]) : "overflow";
+					storeSparseValues((char) (blockLimit - sliceCardinalities[bit]), blockLimit, bit, true);
 				}
 			}
 
@@ -160,6 +141,20 @@ public class SliceZ {
 
 			reset();
 			counts[BLOCK_COUNT]++;
+		}
+
+		private void storeSparseValues(char cardinality, int blockLimit, int bit, boolean invert) {
+			output.putChar(cardinality);
+			int added = 0;
+			long mask = 1L << bit;
+			long filter = invert ? 0L : mask;
+			for (int i = 0; i < blockLimit; i++) {
+				if ((values[i] & mask) == filter) {
+					output.putChar((char) i);
+					added++;
+				}
+			}
+			assert added == cardinality;
 		}
 
 		private void reset() {
