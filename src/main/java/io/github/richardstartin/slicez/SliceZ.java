@@ -3,7 +3,6 @@ package io.github.richardstartin.slicez;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
-import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
 import java.util.function.LongConsumer;
 import java.util.function.LongToDoubleFunction;
@@ -388,6 +387,17 @@ public class SliceZ {
 	}
 
 	/**
+	 * Sums the rows whose value is strictly less than {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive upper bound
+	 * @return the sum of matching values
+	 */
+	public double sumLessThan(long value) {
+		return value == 0L ? 0 : sumLessThanOrEqual(value - 1);
+	}
+
+	/**
 	 * Finds the rows whose value is less than or equal to {@code value} (unsigned).
 	 *
 	 * @param value
@@ -420,6 +430,20 @@ public class SliceZ {
 			return rowCount;
 		}
 		return new SingleBoundQuery(value, true).matchingCount();
+	}
+
+	/**
+	 * Sums the rows whose value is less than or equal to {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive upper bound
+	 * @return the sum of matching values
+	 */
+	public double sumLessThanOrEqual(long value) {
+		if (Long.compareUnsigned(value, min) < 0) {
+			return 0;
+		}
+		return new SingleBoundQuery(value, true).sum();
 	}
 
 	/**
@@ -458,6 +482,20 @@ public class SliceZ {
 	}
 
 	/**
+	 * Sums the rows whose value is strictly greater than {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive lower bound
+	 * @return the sum of matching values
+	 */
+	public double sumGreaterThan(long value) {
+		if (Long.compareUnsigned(value, max) > 0) {
+			return 0L;
+		}
+		return new SingleBoundQuery(value, false).sum();
+	}
+
+	/**
 	 * Finds the rows whose value is greater than or equal to {@code value}
 	 * (unsigned).
 	 *
@@ -479,6 +517,18 @@ public class SliceZ {
 	 */
 	public int countGreaterThanOrEqual(long value) {
 		return value == 0L ? rowCount : countGreaterThan(value - 1);
+	}
+
+	/**
+	 * Sums the rows whose value is greater than or equal to {@code value}
+	 * (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive lower bound
+	 * @return the sum of matching values
+	 */
+	public double sumGreaterThanOrEqual(long value) {
+		return value == 0L ? sumLessThanOrEqual(-1L) : sumGreaterThan(value - 1);
 	}
 
 	/**
@@ -524,6 +574,44 @@ public class SliceZ {
 	}
 
 	/**
+	 * Counts the rows whose value equals any of the given {@code values} (set
+	 * membership).
+	 *
+	 * @param values
+	 *            the values to match; duplicates and ordering do not affect the
+	 *            result
+	 * @return the number of matching rows, or {@code 0} if {@code values} is empty
+	 */
+	public int countIn(long... values) {
+		if (values.length == 0) {
+			return 0;
+		}
+		if (values.length == 1) {
+			return countEqual(values[0]);
+		}
+		return new InQuery(values).matchingCount();
+	}
+
+	/**
+	 * Sums the values of rows whose value equals any of the given {@code values}
+	 * (set membership).
+	 *
+	 * @param values
+	 *            the values to match; duplicates and ordering do not affect the
+	 *            result
+	 * @return the sum of matching values, or {@code 0} if {@code values} is empty
+	 */
+	public double sumIn(long... values) {
+		if (values.length == 0) {
+			return 0D;
+		}
+		if (values.length == 1) {
+			return sumEqual(values[0]);
+		}
+		return new InQuery(values).sum();
+	}
+
+	/**
 	 * Counts the rows whose value equals {@code value}.
 	 *
 	 * @param value
@@ -543,6 +631,30 @@ public class SliceZ {
 	 */
 	public int countNotEqual(long value) {
 		return new EqualityQuery(value, true).matchingCount();
+	}
+
+	/**
+	 * Sums the values equal to {@code value}.
+	 *
+	 * @param value
+	 *            the value to match
+	 * @return the sum of matching rows
+	 */
+	public double sumEqual(long value) {
+		return countEqual(value) * (double) value;
+	}
+
+	/**
+	 * Sums the values not equal to {@code value}.
+	 *
+	 * @param value
+	 *            the value to exclude
+	 * @return the sum of matching values
+	 */
+	public double sumNotEqual(long value) {
+		// fixme if we store the sum this can be computed faster by subtracting sumEqual
+		// from the global sum
+		return new EqualityQuery(value, true).sum();
 	}
 
 	/**
@@ -585,7 +697,31 @@ public class SliceZ {
 		if (lower == 0L) {
 			return countLessThan(upper);
 		}
+		if (Long.compareUnsigned(upper, lower) <= 0) {
+			return 0;
+		}
 		return new BetweenQuery(lower - 1, upper - 1).matchingCount();
+	}
+
+	/**
+	 * Sums all values lying in the half-open unsigned range {@code [lower, upper)}
+	 * — that is, {@code lower <= v < upper} in unsigned order. The lower bound is
+	 * inclusive and the upper bound is exclusive.
+	 *
+	 * @param lower
+	 *            the inclusive lower bound
+	 * @param upper
+	 *            the exclusive upper bound
+	 * @return the sum of matching values
+	 */
+	public double sumBetween(long lower, long upper) {
+		if (lower == 0L) {
+			return sumLessThan(upper);
+		}
+		if (Long.compareUnsigned(upper, lower) <= 0) {
+			return 0;
+		}
+		return new BetweenQuery(lower - 1, upper - 1).sum();
 	}
 
 	/**
@@ -1082,6 +1218,53 @@ public class SliceZ {
 			return matchingCount;
 		}
 
+		public double sum() {
+			double sum = 0D;
+			while (base < rowCount) {
+				int snapshot = position;
+				int limit = range();
+				evaluateBlock();
+				int matchingCount = buffer.count(limit);
+				if (matchingCount > 0) {
+					position = snapshot;
+					long typesHigh = data.getLong(position);
+					position += Long.BYTES;
+					long typesLow = data.getLong(position);
+					position += Long.BYTES;
+					long blockMin = data.getLong(position);
+					position += Long.BYTES;
+					position += Long.BYTES;
+					long fullSlices = typesHigh & typesLow;
+					long storedSlices = ~fullSlices;
+					while (storedSlices != 0L) {
+						int bit = Long.numberOfTrailingZeros(storedSlices);
+						storedSlices &= (storedSlices - 1);
+						int type = ((int) ((typesHigh >>> bit) & 1) << 1) | (int) ((typesLow >>> bit) & 1);
+						int cardinality = 0;
+						switch (type) {
+							case SPARSE_INVERTED -> {
+								cardinality = buffer.sparseAndCardinality(position, data);
+								position += (data.getChar(position) + 1) * Character.BYTES;
+							}
+							case SPARSE -> {
+								cardinality = buffer.sparseAndNotCardinality(position, data, limit);
+								position += (data.getChar(position) + 1) * Character.BYTES;
+							}
+							case DENSE -> {
+								cardinality = buffer.denseAndNotCardinality(position, data, limit);
+								position += BLOCK_WORDS * Long.BYTES;
+							}
+						}
+						sum += (double) cardinality * (1L << bit);
+					}
+					// all values are stored relative to blockMin
+					sum += (double) blockMin * matchingCount;
+				}
+				base += BLOCK_SIZE;
+			}
+			return sum;
+		}
+
 		protected abstract void evaluateBlock();
 
 		protected boolean nextBatch() {
@@ -1103,6 +1286,18 @@ public class SliceZ {
 			base = (int) (packed >>> 32);
 			outputLimit = (int) (packed & 0xFFFF_FFFFL);
 			return outputLimit > 0;
+		}
+
+		protected void skipSlice(int type) {
+			switch (type) {
+				case SPARSE_INVERTED, SPARSE -> {
+					int cnt = data.getChar(position);
+					position += Character.BYTES + cnt * Character.BYTES;
+				}
+				case DENSE -> position += Long.BYTES * BLOCK_WORDS;
+				default -> {
+				} // FULL has no payload
+			}
 		}
 	}
 
@@ -1230,18 +1425,6 @@ public class SliceZ {
 		private BetweenQuery(long lower, long upper) {
 			this.lower = lower;
 			this.upper = upper;
-		}
-
-		private void skipSlice(int type) {
-			switch (type) {
-				case SPARSE_INVERTED, SPARSE -> {
-					int cnt = data.getChar(position);
-					position += Character.BYTES + cnt * Character.BYTES;
-				}
-				case DENSE -> position += Long.BYTES * BLOCK_WORDS;
-				default -> {
-				} // FULL has no payload
-			}
 		}
 
 		private void applySlice(Bits bitmap, long threshold, int type, int i, int range) {
@@ -1485,5 +1668,4 @@ public class SliceZ {
 		}
 		return -1;
 	}
-
 }

@@ -21,6 +21,10 @@ class Bits {
 		return full;
 	}
 
+	boolean isEmpty() {
+		return empty;
+	}
+
 	public void reset() {
 		if (!empty) {
 			Arrays.fill(bits, 0L);
@@ -122,6 +126,68 @@ class Bits {
 		}
 		full = false;
 		return position + SliceZ.BLOCK_WORDS * Long.BYTES;
+	}
+
+	public int denseAndNotCardinality(int position, ByteBuffer data) {
+		return denseAndNotCardinality(position, data, capacity());
+	}
+
+	public int denseAndNotCardinality(int position, ByteBuffer data, int limit) {
+		int cardinality = 0;
+		int wordLimit = (limit + 63) >>> 6;
+		for (int i = 0; i < wordLimit; i++) {
+			cardinality += Long.bitCount(bits[i] & ~data.getLong(position + i * Long.BYTES));
+		}
+		return cardinality;
+	}
+
+	public int sparseAndCardinality(int position, ByteBuffer data) {
+		int cardinality = 0;
+		int p = position;
+		int count = data.getChar(p);
+		p += Character.BYTES;
+		for (int i = 0; i < count; i++) {
+			int next = data.getChar(p);
+			p += Character.BYTES;
+			long word = bits[next >>> 6];
+			cardinality += Long.bitCount(word & (1L << next));
+		}
+		return cardinality;
+	}
+
+	public int sparseAndNotCardinality(int position, ByteBuffer data, int limit) {
+		int cardinality = 0;
+		int p = position;
+		int count = data.getChar(p);
+		p += Character.BYTES;
+		int prev = 0;
+		for (int i = 0; i < count; i++) {
+			int next = data.getChar(p);
+			p += Character.BYTES;
+			cardinality += cardinalityInRange(prev, next);
+			prev = next + 1;
+		}
+		cardinality += cardinalityInRange(prev, limit);
+		return cardinality;
+	}
+
+	private int cardinalityInRange(int from, int to) {
+		if (from >= to)
+			return 0;
+		int firstWord = from >>> 6;
+		int lastWord = to >>> 6;
+		if (firstWord == lastWord) {
+			return Long.bitCount(bits[firstWord] & -1L << from & -1L >>> -to);
+		} else {
+			int cardinality = Long.bitCount(bits[firstWord] & -1L << from);
+			for (int i = firstWord + 1; i < lastWord; i++) {
+				cardinality += Long.bitCount(bits[i]);
+			}
+			if ((to & 63) != 0) {
+				cardinality += Long.bitCount(bits[lastWord] & -1L >>> -to);
+			}
+			return cardinality;
+		}
 	}
 
 	public int sparseOrNot(int position, ByteBuffer data, int range) {
