@@ -89,15 +89,6 @@ public class SliceZ {
 			rid++;
 		}
 
-		/**
-		 * Encodes any buffered rows that have not yet been written into a block. This
-		 * is invoked automatically by {@code build()} and is not normally called
-		 * directly.
-		 */
-		public void flush() {
-			flush(rid);
-		}
-
 		void flush(int blockLimit) {
 			// subtract delimiter to reduce the number of populated slices, figure out
 			// required slice types. this also conflates empty and full slices, allowing for
@@ -216,7 +207,7 @@ public class SliceZ {
 			}
 		}
 
-		SliceZ build() {
+		public SliceZ build() {
 			if ((rid & (BLOCK_SIZE - 1)) != 0) {
 				flush(rid & (BLOCK_SIZE - 1));
 			}
