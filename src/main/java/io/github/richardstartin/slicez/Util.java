@@ -209,4 +209,8 @@ class Util {
 		}
 		bitmap[last] &= ~(-1L >>> -max);
 	}
+
+	static double unsignedToDouble(long unsigned) {
+		return ((unsigned & Long.MAX_VALUE)) + ((unsigned < 0) ? 0x1p63 : 0.0);
+	}
 }

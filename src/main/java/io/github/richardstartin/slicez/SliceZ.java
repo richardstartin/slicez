@@ -1255,10 +1255,10 @@ public class SliceZ {
 								position += BLOCK_WORDS * Long.BYTES;
 							}
 						}
-						sum += (double) cardinality * (1L << bit);
+						sum += cardinality * Math.scalb(1D, bit);
 					}
 					// all values are stored relative to blockMin
-					sum += (double) blockMin * matchingCount;
+					sum += Util.unsignedToDouble(blockMin) * matchingCount;
 				}
 				base += BLOCK_SIZE;
 			}

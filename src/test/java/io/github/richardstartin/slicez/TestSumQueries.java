@@ -214,6 +214,22 @@ class TestSumQueries {
 				"sumBetween with upper == 0 should be empty, not the sum of all v >= lower");
 	}
 
+	@Test
+	void sumBlockMinBit63UnsignedOverflow() {
+		// Four identical values of 2^63: blockMin = 2^63 and every slice is FULL, so
+		// the whole sum comes from `(double) blockMin * matchingCount` (line 1261).
+		// blockMin has bit 63 set, so the signed (double) cast reads it as
+		// Long.MIN_VALUE (negative) instead of its true unsigned magnitude 2^63,
+		// yielding a large negative sum instead of a positive one.
+		long v = 1L << 63; // 0x8000_0000_0000_0000, unsigned 2^63
+		long[] data = {v, v, v, v};
+		var idx = buildIdx(data);
+		// 2^63 is exactly representable as a double; unsigned expected = 4 * 2^63
+		double expected = 4 * 0x1p63;
+		assertEquals(expected, idx.sumGreaterThanOrEqual(0), 1.0,
+				"(double) blockMin treated bit-63 value as signed/negative");
+	}
+
 	// -------------------------------------------------------------------------
 	// sumIn / countIn
 	// -------------------------------------------------------------------------
