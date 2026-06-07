@@ -336,6 +336,19 @@ class TestSliceZ {
 		assertEquals(1.0 + 2 + 3, idx.sumBetween(1, 4), 0.0);
 	}
 
+	@Test
+	void betweenUpperZeroIsEmpty() {
+		// between(lower, 0) means lower <= v < 0, always empty in unsigned order, and
+		// the javadoc promises empty when upper <= lower. The iterator form lacks the
+		// upper <= lower guard that countBetween/sumBetween have: upper - 1 underflows
+		// to -1L (unsigned max), so BetweenQuery(lower - 1, -1L) returns every v > 4.
+		var idx = build(0, 1, 2, 3, 4, 5, 6, 7);
+		assertArrayEquals(new int[]{}, collect(idx.between(5, 0)));
+		// keep the iterator consistent with the other two forms
+		assertEquals(0, idx.countBetween(5, 0));
+		assertEquals(0.0, idx.sumBetween(5, 0), 0.0);
+	}
+
 	// -------------------------------------------------------------------------
 	// Unsigned semantics at the 32-bit boundary
 	// -------------------------------------------------------------------------

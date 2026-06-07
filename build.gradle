@@ -46,6 +46,14 @@ java {
     withSourcesJar()
 }
 
+javadoc {
+    options.memberLevel = JavadocMemberLevel.PUBLIC
+    // Keep doclint's html/syntax/reference checks, but suppress "missing"
+    // warnings (e.g. "no main description") so partially-documented public
+    // members don't fail the build.
+    options.addBooleanOption('Xdoclint:all,-missing', true)
+}
+
 publishing {
     publications {
         mavenJava(MavenPublication) {

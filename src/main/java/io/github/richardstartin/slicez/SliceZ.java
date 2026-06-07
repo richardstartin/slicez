@@ -59,6 +59,9 @@ public class SliceZ {
 	 */
 	public static final class Appender implements LongConsumer {
 
+		private Appender() {
+		}
+
 		private final long[] values = new long[BLOCK_SIZE];
 		private final int[] sliceCardinalities = new int[Long.SIZE];
 		private ByteBuffer output = ByteBuffer.allocate(1 << 10).position(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN);
@@ -207,6 +210,11 @@ public class SliceZ {
 			}
 		}
 
+		/**
+		 * Flushes any buffered rows and finalises the index.
+		 *
+		 * @return an immutable {@link SliceZ} over all values added so far
+		 */
 		public SliceZ build() {
 			if ((rid & (BLOCK_SIZE - 1)) != 0) {
 				flush(rid & (BLOCK_SIZE - 1));
@@ -661,7 +669,8 @@ public class SliceZ {
 	 *         less than or equal to {@code lower} in unsigned order
 	 */
 	public PrimitiveIterator.OfInt between(long lower, long upper) {
-		if (Long.compareUnsigned(upper, min) < 0 || Long.compareUnsigned(max, lower) < 0) {
+		if (Long.compareUnsigned(upper, min) < 0 || Long.compareUnsigned(max, lower) < 0
+				|| Long.compareUnsigned(upper, lower) <= 0) {
 			return IntStream.empty().iterator();
 		}
 		if (Long.compareUnsigned(lower, min) < 0 && Long.compareUnsigned(max, upper) < 0) {
@@ -1158,7 +1167,7 @@ public class SliceZ {
 			return !values.isEmpty();
 		}
 
-		public long sumLongs() {
+		long sumLongs() {
 			long[] keys = values.backingKeys();
 			long sum = 0L;
 			for (int i = 0; i < size; i++) {
@@ -1167,7 +1176,7 @@ public class SliceZ {
 			return sum;
 		}
 
-		public double sumDoubles(LongToDoubleFunction encoding) {
+		double sumDoubles(LongToDoubleFunction encoding) {
 			long[] keys = values.backingKeys();
 			double sum = 0D;
 			for (int i = 0; i < size; i++) {
@@ -1198,7 +1207,7 @@ public class SliceZ {
 			return base < rowCount || outputPosition < outputLimit;
 		}
 
-		public int matchingCount() {
+		int matchingCount() {
 			int matchingCount = 0;
 			while (base < rowCount) {
 				int limit = range();
@@ -1209,7 +1218,7 @@ public class SliceZ {
 			return matchingCount;
 		}
 
-		public double sum() {
+		double sum() {
 			double sum = 0D;
 			while (base < rowCount) {
 				int snapshot = position;
