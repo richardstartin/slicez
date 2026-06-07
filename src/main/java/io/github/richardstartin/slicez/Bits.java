@@ -128,46 +128,62 @@ class Bits {
 		return position + SliceZ.BLOCK_WORDS * Long.BYTES;
 	}
 
-	public int denseAndNotCardinality(int position, ByteBuffer data) {
-		return denseAndNotCardinality(position, data, capacity());
-	}
-
 	public int denseAndNotCardinality(int position, ByteBuffer data, int limit) {
 		int cardinality = 0;
-		int wordLimit = (limit + 63) >>> 6;
-		for (int i = 0; i < wordLimit; i++) {
-			cardinality += Long.bitCount(bits[i] & ~data.getLong(position + i * Long.BYTES));
+		if (!empty) {
+			int wordLimit = (limit + 63) >>> 6;
+			if (full) {
+				for (int i = 0; i < wordLimit; i++) {
+					cardinality += Long.bitCount(~data.getLong(position + i * Long.BYTES));
+				}
+			} else {
+				for (int i = 0; i < wordLimit; i++) {
+					cardinality += Long.bitCount(bits[i] & ~data.getLong(position + i * Long.BYTES));
+				}
+			}
 		}
 		return cardinality;
 	}
 
 	public int sparseAndCardinality(int position, ByteBuffer data) {
 		int cardinality = 0;
-		int p = position;
-		int count = data.getChar(p);
-		p += Character.BYTES;
-		for (int i = 0; i < count; i++) {
-			int next = data.getChar(p);
+		if (!empty) {
+			int p = position;
+			int count = data.getChar(p);
 			p += Character.BYTES;
-			long word = bits[next >>> 6];
-			cardinality += Long.bitCount(word & (1L << next));
+			if (full) {
+				cardinality = count;
+			} else {
+				for (int i = 0; i < count; i++) {
+					int next = data.getChar(p);
+					p += Character.BYTES;
+					long word = bits[next >>> 6];
+					cardinality += Long.bitCount(word & (1L << next));
+				}
+			}
 		}
 		return cardinality;
 	}
 
 	public int sparseAndNotCardinality(int position, ByteBuffer data, int limit) {
 		int cardinality = 0;
-		int p = position;
-		int count = data.getChar(p);
-		p += Character.BYTES;
-		int prev = 0;
-		for (int i = 0; i < count; i++) {
-			int next = data.getChar(p);
+		if (!empty) {
+			int p = position;
+			int count = data.getChar(p);
 			p += Character.BYTES;
-			cardinality += cardinalityInRange(prev, next);
-			prev = next + 1;
+			if (full) {
+				cardinality = limit - count;
+			} else {
+				int prev = 0;
+				for (int i = 0; i < count; i++) {
+					int next = data.getChar(p);
+					p += Character.BYTES;
+					cardinality += cardinalityInRange(prev, next);
+					prev = next + 1;
+				}
+				cardinality += cardinalityInRange(prev, limit);
+			}
 		}
-		cardinality += cardinalityInRange(prev, limit);
 		return cardinality;
 	}
 
