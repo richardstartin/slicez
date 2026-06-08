@@ -305,28 +305,28 @@ class Bits {
 		}
 	}
 
-	public long extractBits(int base, int range, int[] output) {
+	public int extractBits(int range, char[] output) {
 		int outputLimit = 0;
 		if (!empty) {
 			if (full) {
 				outputLimit = range;
 				for (int i = 0; i < outputLimit; i++) {
-					output[i] = base + i;
+					output[i] = (char) i;
 				}
 			} else {
 				int lastWordIndex = range >>> 6;
-				int b = base;
+				int b = 0;
 				for (int i = 0; i < lastWordIndex; i++, b += Long.SIZE) {
 					long word = bits[i];
 					// try to avoid data dependent bit extraction for common case
 					if (word == -1L) {
 						for (int j = 0; j < Long.SIZE; j++) {
-							output[outputLimit + j] = b + j;
+							output[outputLimit + j] = (char) (b + j);
 						}
 						outputLimit += Long.SIZE;
 					} else {
 						while (word != 0) {
-							output[outputLimit++] = b + Long.numberOfTrailingZeros(word);
+							output[outputLimit++] = (char) (b + Long.numberOfTrailingZeros(word));
 							word &= (word - 1);
 						}
 					}
@@ -338,13 +338,13 @@ class Bits {
 					long mask = (1L << range) - 1;
 					long word = bits[lastWordIndex] & mask;
 					while (word != 0) {
-						output[outputLimit++] = b + Long.numberOfTrailingZeros(word);
+						output[outputLimit++] = (char) (b + Long.numberOfTrailingZeros(word));
 						word &= (word - 1);
 					}
 				}
 			}
 		}
-		return outputLimit | ((long) (base + SliceZ.BLOCK_SIZE) << 32);
+		return outputLimit;
 	}
 
 	public int count(int limit) {

@@ -410,7 +410,7 @@ public class SliceZ {
 		if (Long.compareUnsigned(value, max) > 0) {
 			return IntStream.range(0, rowCount).iterator();
 		}
-		return new SingleBoundQuery(value, true);
+		return new SingleBoundQuery(value, true).iterator();
 	}
 
 	/**
@@ -459,7 +459,7 @@ public class SliceZ {
 		if (Long.compareUnsigned(value, max) > 0) {
 			return IntStream.empty().iterator();
 		}
-		return new SingleBoundQuery(value, false);
+		return new SingleBoundQuery(value, false).iterator();
 	}
 
 	/**
@@ -538,7 +538,7 @@ public class SliceZ {
 	 * @return the matching row ids in ascending order
 	 */
 	public PrimitiveIterator.OfInt equal(long value) {
-		return new EqualityQuery(value, false);
+		return new EqualityQuery(value, false).iterator();
 	}
 
 	/**
@@ -549,7 +549,7 @@ public class SliceZ {
 	 * @return the matching row ids in ascending order
 	 */
 	public PrimitiveIterator.OfInt notEqual(long value) {
-		return new EqualityQuery(value, true);
+		return new EqualityQuery(value, true).iterator();
 	}
 
 	/**
@@ -569,7 +569,7 @@ public class SliceZ {
 		if (values.length == 1) {
 			return equal(values[0]);
 		}
-		return new InQuery(values);
+		return new InQuery(values).iterator();
 	}
 
 	/**
@@ -679,7 +679,7 @@ public class SliceZ {
 		if (lower == 0L) {
 			return lessThan(upper);
 		}
-		return new BetweenQuery(lower - 1, upper - 1);
+		return new BetweenQuery(lower - 1, upper - 1).iterator();
 	}
 
 	/**
@@ -1186,25 +1186,56 @@ public class SliceZ {
 		}
 	}
 
-	protected abstract class BaseQuery implements PrimitiveIterator.OfInt {
-		protected final Bits buffer = new Bits();
-		protected int position = HEADER_SIZE;
-		protected final int[] output = new int[buffer.capacity()];
-		protected int outputPosition = 0;
-		protected int outputLimit = 0;
-		protected int base = 0;
+	private static class OutputIterator implements PrimitiveIterator.OfInt {
+		private final BaseQuery query;
+		private final char[] output;
+		private final int rowCount;
+		private int prefix;
+		private int base;
+		private int it;
+		private int outputLimit;
+
+		private OutputIterator(BaseQuery query, int rowCount, char[] output) {
+			this.query = query;
+			this.output = output;
+			this.rowCount = rowCount;
+		}
 
 		@Override
 		public int nextInt() {
-			return output[outputPosition++];
+			return prefix + output[it++];
 		}
 
 		@Override
 		public boolean hasNext() {
-			if (outputPosition == outputLimit) {
+			if (it == outputLimit) {
 				while (base < rowCount && !nextBatch());
 			}
-			return base < rowCount || outputPosition < outputLimit;
+			return base < rowCount || it < outputLimit;
+		}
+
+		private boolean nextBatch() {
+			prefix = base;
+			query.evaluateBlock();
+			int range = Math.min(rowCount - base, output.length);
+			outputLimit = query.extractBits(output, range);
+			base += range;
+			it = 0;
+			return outputLimit > 0;
+		}
+	}
+
+	protected abstract class BaseQuery {
+		protected final Bits buffer = new Bits();
+		protected int position = HEADER_SIZE;
+		protected int base = 0;
+
+		public PrimitiveIterator.OfInt iterator() {
+			return new OutputIterator(this, rowCount, new char[buffer.capacity()]);
+		}
+
+		int extractBits(char[] output, int range) {
+			return buffer.extractBits(range, output);
 		}
 
 		int matchingCount() {
@@ -1267,25 +1298,12 @@ public class SliceZ {
 
 		protected abstract void evaluateBlock();
 
-		protected boolean nextBatch() {
-			evaluateBlock();
-			return extractBits();
-		}
-
 		protected void skipBlock(long typesHigh, long typesLow) {
 			position = Util.skipBlock(data, position, typesHigh, typesLow);
 		}
 
 		protected final int range() {
 			return Math.min(rowCount - base, buffer.capacity());
-		}
-
-		protected boolean extractBits() {
-			outputPosition = 0;
-			long packed = buffer.extractBits(base, range(), output);
-			base = (int) (packed >>> 32);
-			outputLimit = (int) (packed & 0xFFFF_FFFFL);
-			return outputLimit > 0;
 		}
 
 		protected void skipSlice(int type) {
