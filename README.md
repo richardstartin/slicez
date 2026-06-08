@@ -50,46 +50,53 @@ SliceZ index = appender.build();
 
 ### Querying
 
-Each predicate is available in three forms: an iterator over matching row indices (`…`), a count (`count…`), and a sum of the matching values (`sum…`).
+Each predicate is available in four forms: an iterator over matching row indices (`…`), a count (`count…`), a sum of the matching values (`sum…`), and an arithmetic mean (`mean…`).
 
 ```java
 // equality
 PrimitiveIterator.OfInt it = index.equal(42L);
 int    count = index.countEqual(42L);
 double sum   = index.sumEqual(42L);
+double mean  = index.meanEqual(42L);    // == 42.0 when any row matches, else 0.0
 
 // range — lessThan / lessThanOrEqual / greaterThan / greaterThanOrEqual,
-// each with a matching count… and sum… method
+// each with a matching count…, sum…, and mean… method
 it    = index.lessThan(1000L);
 count = index.countLessThan(1000L);
 sum   = index.sumLessThan(1000L);
+mean  = index.meanLessThan(1000L);      // == sum / count when count > 0, else 0.0
 
 it    = index.greaterThanOrEqual(42L);
 count = index.countGreaterThanOrEqual(42L);
 sum   = index.sumGreaterThanOrEqual(42L);
+mean  = index.meanGreaterThanOrEqual(42L);
 
 // between(lower, upper) is half-open: lower <= value < upper
 // (inclusive lower bound, exclusive upper bound)
 it    = index.between(42L, 1000L);
 count = index.countBetween(42L, 1000L);
 sum   = index.sumBetween(42L, 1000L);
+mean  = index.meanBetween(42L, 1000L);
 
 // inequality and multi-value match
 it    = index.notEqual(42L);
 count = index.countNotEqual(42L);
 sum   = index.sumNotEqual(42L);
+mean  = index.meanNotEqual(42L);
 
 it    = index.in(1L, 42L, 1000L);
 count = index.countIn(1L, 42L, 1000L);
 sum   = index.sumIn(1L, 42L, 1000L);
+mean  = index.meanIn(1L, 42L, 1000L);
 
 // top-k / bottom-k by unsigned order; partial when fewer than k rows exist
 PrimitiveIterator.OfInt  topIds   = index.top(10);          // row ids
 PrimitiveIterator.OfInt  botIds   = index.bottom(10);
 PrimitiveIterator.OfLong topVals  = index.topValues(10);    // the values themselves
 PrimitiveIterator.OfLong botVals  = index.bottomValues(10);
-long topSum = index.topSum(10);                             // sum of the top-10 values
-long botSum = index.bottomSum(10);
+long   topSum  = index.topSum(10);                          // sum of the top-10 values
+long   botSum  = index.bottomSum(10);
+double botMean = index.bottomMean(10);                      // mean of the bottom-10 values
 // decode each selected value before summing (e.g. when longs encode doubles)
 double topMagnitude = index.topSum(10, ord -> decode(ord));
 
@@ -132,7 +139,7 @@ PrimitiveIterator.OfInt it = index.lessThanOrEqual(ordinal(threshold));
 
 ### Overview
 
-SliceZ answers equality and range queries (`=`, `≠`, `<`, `≤`, `>`, `≥`, `between`, `in`) over sequences of `long` values without sorting the data. Every predicate can return matching row ids, a count, or a `double` sum of the matching values, and the index also supports `top`/`bottom`-*k* selection (as row ids, values, or a summed total). It is a bit-sliced index in the tradition of O'Neil and Quass (1997). IEEE 754 doubles can be indexed by first mapping them to a total unsigned order with `FPOrdering.ordinalOf`.
+SliceZ answers equality and range queries (`=`, `≠`, `<`, `≤`, `>`, `≥`, `between`, `in`) over sequences of `long` values without sorting the data. Every predicate can return matching row ids, a count, a `double` sum, or a `double` arithmetic mean of the matching values, and the index also supports `top`/`bottom`-*k* selection (as row ids, values, a summed total, or a mean). It is a bit-sliced index in the tradition of O'Neil and Quass (1997). IEEE 754 doubles can be indexed by first mapping them to a total unsigned order with `FPOrdering.ordinalOf`.
 
 Block-level introspection is exposed through `getBlockCount`, `getFullSliceCount`, `getDenseSliceCount`, `getSparseSliceCount`, `getSparseInvertedSliceCount`, and `getCompressionRatio` — the slice-type breakdown tables below are produced from these counters.
 
@@ -184,18 +191,21 @@ If a slice would make the result empty, the rest of the block is skipped entirel
 
 The supporting `Heap` is a custom bounded min-heap with parallel `long[] keys` and `T[] values`. Comparisons run on the `long` keys via a `LongComparator` functional interface, and the `values[]` slot tracks its key through every sift, so callers reuse pre-allocated `Block` / `Row` instances rather than allocating per insertion.
 
-`topValues` / `bottomValues` reuse the same two-pass selection but the k-row heap is keyed on the selected *values*, so draining the heap yields the values directly rather than their row ids. `topSum` / `bottomSum` go one step further and sum the heap's keys without materialising them: the `long`-returning forms use wrapping two's-complement addition (so they agree with summing `topValues`/`bottomValues` element by element), while the `LongToDoubleFunction` overloads decode each key before accumulating in `double`.
+`topValues` / `bottomValues` reuse the same two-pass selection but the k-row heap is keyed on the selected *values*, so draining the heap yields the values directly rather than their row ids. `topSum` / `bottomSum` go one step further and sum the heap's keys without materialising them: the `long`-returning forms use wrapping two's-complement addition (so they agree with summing `topValues`/`bottomValues` element by element), while the `LongToDoubleFunction` overloads decode each key before accumulating in `double`. `bottomMean(k)` divides the same sum by the number of values actually found (at most `k`), returning `0.0` when the index is empty.
 
-### Aggregation: `count` and `sum`
+### Aggregation: `count`, `sum`, and `mean`
 
 `count…` evaluates the predicate into the `Bits` accumulator and population-counts the matching rows in each block, summed across blocks.
 
 `sum…` reuses the same predicate evaluation but, rather than materialising row ids, reconstructs the matching total straight from the slices. For each block it first fills the accumulator with the matching rows, then walks the stored (non-FULL) slices: for the slice at bit position `b` it counts how many *matching* rows have that bit set in the original value — `cardinality` — using the type-specific `…AndCardinality` / `…AndNotCardinality` operations, and adds `cardinality × 2^b`. FULL slices carry a stored bit that is set for every row, which under the `~(v − blockMin)` transform corresponds to a *zero* bit in `v − blockMin`; they therefore contribute nothing and are skipped. Finally `blockMin × matchingCount` restores the per-block offset that was subtracted at build time.
 
-Two details matter for correctness:
+`mean…` is `sum… / count…` for non-empty match sets and returns `0.0` when no rows match. It shares the same single-pass slice walk as `sum`, accumulating both the running total and the row count simultaneously. `meanEqual(v)` short-circuits to `(double) v` (or `0.0` when absent) without touching slices, and `bottomMean(k)` averages the `k`-smallest values selected by the two-pass heap algorithm.
+
+Three details matter for correctness:
 
 - **Accumulation is in `double`.** Both the per-slice term (`cardinality × 2^b`) and the block-offset term (`blockMin × matchingCount`) are widened to `double` *before* multiplying, so they cannot overflow `long` even when `b` is large or a block has up to 65,536 matching rows.
-- **`sumEqual` short-circuits** to `countEqual(value) × value` instead of walking slices, since every matching row contributes exactly `value`.
+- **`sumEqual` / `meanEqual` short-circuit** to `countEqual(value) × value` (resp. `value`) instead of walking slices, since every matching row contributes exactly `value`.
+- **`mean…` returns `0.0` on empty match sets** rather than `NaN`, so callers need not guard against division by zero.
 
 ### Slice operations
 
