@@ -205,6 +205,7 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{0, 1, 2}, collect(idx.lessThan(3)));
 		assertEquals(3, idx.countLessThan(3));
 		assertEquals(0.0 + 1 + 2, idx.sumLessThan(3), 0.0);
+		assertEquals(idx.sumLessThan(3) / idx.countLessThan(3), idx.meanLessThan(3), 1e-9);
 	}
 
 	@Test
@@ -213,6 +214,7 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{0, 1, 2, 3}, collect(idx.lessThanOrEqual(3)));
 		assertEquals(4, idx.countLessThanOrEqual(3));
 		assertEquals(0.0 + 1 + 2 + 3, idx.sumLessThanOrEqual(3), 0.0);
+		assertEquals(idx.sumLessThanOrEqual(3) / idx.countLessThanOrEqual(3), idx.meanLessThanOrEqual(3), 1e-9);
 	}
 
 	@Test
@@ -221,7 +223,9 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{2}, collect(idx.equal(2)));
 		assertEquals(1, idx.countEqual(3));
 		assertEquals(2.0, idx.sumEqual(2), 0.0);
+		assertEquals(idx.sumEqual(2) / idx.countEqual(2), idx.meanEqual(2), 1e-9);
 		assertEquals(3.0, idx.sumEqual(3), 0.0);
+		assertEquals(idx.sumEqual(3) / idx.countEqual(3), idx.meanEqual(3), 1e-9);
 	}
 
 	@Test
@@ -230,6 +234,7 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{0, 1, 3, 4}, collect(idx.notEqual(2)));
 		assertEquals(4, idx.countNotEqual(2));
 		assertEquals(0.0 + 1 + 3 + 4, idx.sumNotEqual(2), 0.0);
+		assertEquals(idx.sumNotEqual(2) / idx.countNotEqual(2), idx.meanNotEqual(2), 1e-9);
 	}
 
 	@Test
@@ -238,6 +243,7 @@ class TestSliceZ {
 		assertArrayEquals(range(0, 5), collect(idx.notEqual(99)));
 		assertEquals(5, idx.countNotEqual(99));
 		assertEquals(0.0 + 1 + 2 + 3 + 4, idx.sumNotEqual(99), 0.0);
+		assertEquals(idx.sumNotEqual(99) / idx.countNotEqual(99), idx.meanNotEqual(99), 1e-9);
 	}
 
 	@Test
@@ -318,6 +324,7 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{3, 4}, collect(idx.greaterThan(2)));
 		assertEquals(2, idx.countGreaterThan(2));
 		assertEquals(3.0 + 4, idx.sumGreaterThan(2), 0.0);
+		assertEquals(idx.sumGreaterThan(2) / idx.countGreaterThan(2), idx.meanGreaterThan(2), 1e-9);
 	}
 
 	@Test
@@ -326,6 +333,8 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{2, 3, 4}, collect(idx.greaterThanOrEqual(2)));
 		assertEquals(3, idx.countGreaterThanOrEqual(2));
 		assertEquals(2.0 + 3 + 4, idx.sumGreaterThanOrEqual(2), 0.0);
+		assertEquals(idx.sumGreaterThanOrEqual(2) / idx.countGreaterThanOrEqual(2), idx.meanGreaterThanOrEqual(2),
+				1e-9);
 	}
 
 	@Test
@@ -334,6 +343,7 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{1, 2, 3}, collect(idx.between(1, 4)));
 		assertEquals(3, idx.countBetween(1, 4));
 		assertEquals(1.0 + 2 + 3, idx.sumBetween(1, 4), 0.0);
+		assertEquals(idx.sumBetween(1, 4) / idx.countBetween(1, 4), idx.meanBetween(1, 4), 1e-9);
 	}
 
 	@Test
@@ -347,6 +357,7 @@ class TestSliceZ {
 		// keep the iterator consistent with the other two forms
 		assertEquals(0, idx.countBetween(5, 0));
 		assertEquals(0.0, idx.sumBetween(5, 0), 0.0);
+		assertEquals(0.0, idx.meanBetween(5, 0), 0.0);
 	}
 
 	// -------------------------------------------------------------------------
@@ -366,6 +377,7 @@ class TestSliceZ {
 		assertEquals(3, idx.countLessThan(MID_U32));
 		// 0 + 1 + Integer.MAX_VALUE
 		assertEquals(0.0 + 1 + SIGNED_MAX, idx.sumLessThan(MID_U32), 0.0);
+		assertEquals(idx.sumLessThan(MID_U32) / idx.countLessThan(MID_U32), idx.meanLessThan(MID_U32), 1e-9);
 	}
 
 	@Test
@@ -374,6 +386,8 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{3, 4}, collect(idx.greaterThan(SIGNED_MAX)));
 		assertEquals(2, idx.countGreaterThan(SIGNED_MAX));
 		assertEquals(MID_U32 + MAX_U32, idx.sumGreaterThan(SIGNED_MAX), 0.0);
+		assertEquals(idx.sumGreaterThan(SIGNED_MAX) / idx.countGreaterThan(SIGNED_MAX), idx.meanGreaterThan(SIGNED_MAX),
+				1e-9);
 	}
 
 	@Test
@@ -382,6 +396,7 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{4}, collect(idx.equal(MAX_U32)));
 		assertEquals(1, idx.countEqual(MAX_U32));
 		assertEquals((double) MAX_U32, idx.sumEqual(MAX_U32), 0.0);
+		assertEquals(idx.sumEqual(MAX_U32) / idx.countEqual(MAX_U32), idx.meanEqual(MAX_U32), 1e-9);
 	}
 
 	@Test
@@ -390,6 +405,8 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{2, 3}, collect(idx.between(SIGNED_MAX, MAX_U32)));
 		assertEquals(2, idx.countBetween(SIGNED_MAX, MAX_U32));
 		assertEquals(SIGNED_MAX + MID_U32, idx.sumBetween(SIGNED_MAX, MAX_U32), 0.0);
+		assertEquals(idx.sumBetween(SIGNED_MAX, MAX_U32) / idx.countBetween(SIGNED_MAX, MAX_U32),
+				idx.meanBetween(SIGNED_MAX, MAX_U32), 1e-9);
 	}
 
 	@Test
@@ -398,6 +415,8 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{0, 1, 2, 3, 4}, collect(idx.greaterThanOrEqual(0L)));
 		assertEquals(5, idx.countGreaterThanOrEqual(0L));
 		assertEquals(0.0 + 1 + SIGNED_MAX + MID_U32 + MAX_U32, idx.sumGreaterThanOrEqual(0L), 0.0);
+		assertEquals(idx.sumGreaterThanOrEqual(0L) / idx.countGreaterThanOrEqual(0L), idx.meanGreaterThanOrEqual(0L),
+				1e-9);
 	}
 
 	@Test
@@ -406,6 +425,8 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{0, 1, 2, 3, 4}, collect(idx.lessThanOrEqual(MAX_U32)));
 		assertEquals(5, idx.countLessThanOrEqual(MAX_U32));
 		assertEquals(0.0 + 1 + SIGNED_MAX + MID_U32 + MAX_U32, idx.sumLessThanOrEqual(MAX_U32), 0.0);
+		assertEquals(idx.sumLessThanOrEqual(MAX_U32) / idx.countLessThanOrEqual(MAX_U32),
+				idx.meanLessThanOrEqual(MAX_U32), 1e-9);
 	}
 
 	// -------------------------------------------------------------------------
@@ -418,6 +439,7 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{}, collect(idx.lessThan(0L)));
 		assertEquals(0, idx.countLessThan(0L));
 		assertEquals(0.0, idx.sumLessThan(0L), 0.0);
+		assertEquals(0.0, idx.meanLessThan(0L), 0.0);
 	}
 
 	@Test
@@ -426,6 +448,7 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{}, collect(idx.greaterThan(MAX_U32)));
 		assertEquals(0, idx.countGreaterThan(MAX_U32));
 		assertEquals(0.0, idx.sumGreaterThan(MAX_U32), 0.0);
+		assertEquals(0.0, idx.meanGreaterThan(MAX_U32), 0.0);
 	}
 
 	@Test
@@ -443,6 +466,11 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{}, collect(idx.between(0L, 10L)));
 		assertEquals(0, idx.countBetween(0L, 10L));
 		assertEquals(0.0, idx.sumBetween(0L, 10L), 0.0);
+		assertEquals(0.0, idx.meanLessThan(5L), 0.0);
+		assertEquals(0.0, idx.meanGreaterThan(5L), 0.0);
+		assertEquals(0.0, idx.meanEqual(5L), 0.0);
+		assertEquals(0.0, idx.meanNotEqual(5L), 0.0);
+		assertEquals(0.0, idx.meanBetween(0L, 10L), 0.0);
 	}
 
 	@Test
@@ -451,12 +479,15 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{0, 1, 2}, collect(idx.equal(3L)));
 		assertEquals(3, idx.countEqual(3L));
 		assertEquals(9.0, idx.sumEqual(3L), 0.0);
+		assertEquals(idx.sumEqual(3L) / idx.countEqual(3L), idx.meanEqual(3L), 1e-9);
 		assertArrayEquals(new int[]{3, 4}, collect(idx.lessThan(3L)));
 		assertEquals(2, idx.countLessThan(3L));
 		assertEquals(1.0 + 2, idx.sumLessThan(3L), 0.0);
+		assertEquals(idx.sumLessThan(3L) / idx.countLessThan(3L), idx.meanLessThan(3L), 1e-9);
 		assertArrayEquals(new int[]{}, collect(idx.greaterThan(3L)));
 		assertEquals(0, idx.countGreaterThan(3L));
 		assertEquals(0.0, idx.sumGreaterThan(3L), 0.0);
+		assertEquals(0.0, idx.meanGreaterThan(3L), 0.0);
 	}
 
 	@Test
@@ -465,6 +496,7 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{}, collect(idx.between(2L, 2L)));
 		assertEquals(0, idx.countBetween(2L, 2L));
 		assertEquals(0.0, idx.sumBetween(2L, 2L), 0.0);
+		assertEquals(0.0, idx.meanBetween(2L, 2L), 0.0);
 	}
 
 	@Test
@@ -473,6 +505,7 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{}, collect(idx.between(3L, 1L)));
 		assertEquals(0, idx.countBetween(3L, 1L));
 		assertEquals(0.0, idx.sumBetween(3L, 1L), 0.0);
+		assertEquals(0.0, idx.meanBetween(3L, 1L), 0.0);
 	}
 
 	@Test
@@ -481,18 +514,23 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{0}, collect(idx.equal(42L)));
 		assertEquals(1, idx.countEqual(42L));
 		assertEquals(42.0, idx.sumEqual(42L), 0.0);
+		assertEquals(idx.sumEqual(42L) / idx.countEqual(42L), idx.meanEqual(42L), 1e-9);
 		assertArrayEquals(new int[]{}, collect(idx.lessThan(42L)));
 		assertEquals(0, idx.countLessThan(42L));
 		assertEquals(0.0, idx.sumLessThan(42L), 0.0);
+		assertEquals(0.0, idx.meanLessThan(42L), 0.0);
 		assertArrayEquals(new int[]{}, collect(idx.greaterThan(42L)));
 		assertEquals(0, idx.countGreaterThan(42L));
 		assertEquals(0.0, idx.sumGreaterThan(42L), 0.0);
+		assertEquals(0.0, idx.meanGreaterThan(42L), 0.0);
 		assertArrayEquals(new int[]{0}, collect(idx.between(42L, 43L)));
 		assertEquals(1, idx.countBetween(42L, 43L));
 		assertEquals(42.0, idx.sumBetween(42L, 43L), 0.0);
+		assertEquals(idx.sumBetween(42L, 43L) / idx.countBetween(42L, 43L), idx.meanBetween(42L, 43L), 1e-9);
 		assertArrayEquals(new int[]{}, collect(idx.between(41L, 42L)));
 		assertEquals(0, idx.countBetween(41L, 42L));
 		assertEquals(0.0, idx.sumBetween(41L, 42L), 0.0);
+		assertEquals(0.0, idx.meanBetween(41L, 42L), 0.0);
 	}
 
 	@Test
@@ -501,12 +539,17 @@ class TestSliceZ {
 		assertArrayEquals(new int[]{0, 1, 2}, collect(idx.equal(0L)));
 		assertEquals(3, idx.countEqual(0L));
 		assertEquals(0.0, idx.sumEqual(0L), 0.0);
+		// meanEqual(0): count > 0, sum = 0, mean = 0 (consistent with sum/count = 0)
+		assertEquals(0.0, idx.meanEqual(0L), 0.0);
 		assertArrayEquals(new int[]{}, collect(idx.lessThan(0L)));
 		assertEquals(0, idx.countLessThan(0L));
 		assertEquals(0.0, idx.sumLessThan(0L), 0.0);
+		assertEquals(0.0, idx.meanLessThan(0L), 0.0);
 		assertArrayEquals(new int[]{0, 1, 2}, collect(idx.lessThanOrEqual(0L)));
 		assertEquals(3, idx.countLessThanOrEqual(0L));
 		assertEquals(0.0, idx.sumLessThanOrEqual(0L), 0.0);
+		// meanLessThanOrEqual(0): count = 3, sum = 0, mean = 0
+		assertEquals(0.0, idx.meanLessThanOrEqual(0L), 0.0);
 	}
 
 	// -------------------------------------------------------------------------

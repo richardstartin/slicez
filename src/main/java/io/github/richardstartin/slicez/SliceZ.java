@@ -21,10 +21,11 @@ import java.util.stream.LongStream;
  * {@link Appender}.
  *
  * <p>
- * Query methods come in two flavours: those returning a
+ * Query methods come in four flavours: those returning a
  * {@link PrimitiveIterator.OfInt} yield the matching row ids in ascending
- * order, while the {@code count*} variants return only the number of matches
- * without materializing them.
+ * order; the {@code count*} variants return only the number of matches; the
+ * {@code sum*} variants return the sum of matching values as a {@code double};
+ * and the {@code mean*} variants return their arithmetic mean.
  */
 public class SliceZ {
 
@@ -397,6 +398,18 @@ public class SliceZ {
 	}
 
 	/**
+	 * Computes the arithmetic mean of the rows whose value is strictly less than
+	 * {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive upper bound
+	 * @return the mean of matching values, or {@code 0} if there are no matches
+	 */
+	public double meanLessThan(long value) {
+		return value == 0L ? 0 : meanLessThanOrEqual(value - 1);
+	}
+
+	/**
 	 * Finds the rows whose value is less than or equal to {@code value} (unsigned).
 	 *
 	 * @param value
@@ -443,6 +456,21 @@ public class SliceZ {
 			return 0;
 		}
 		return new SingleBoundQuery(value, true).sum();
+	}
+
+	/**
+	 * Computes the arithmetic mean of the rows whose value is less than or equal to
+	 * {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive upper bound
+	 * @return the mean of matching values, or {@code 0} if there are no matches
+	 */
+	public double meanLessThanOrEqual(long value) {
+		if (Long.compareUnsigned(value, min) < 0) {
+			return 0;
+		}
+		return new SingleBoundQuery(value, true).mean();
 	}
 
 	/**
@@ -495,6 +523,21 @@ public class SliceZ {
 	}
 
 	/**
+	 * Computes the arithmetic mean of the rows whose value is strictly greater than
+	 * {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive lower bound
+	 * @return the mean of matching values, or {@code 0} if there are no matches
+	 */
+	public double meanGreaterThan(long value) {
+		if (Long.compareUnsigned(value, max) > 0) {
+			return 0L;
+		}
+		return new SingleBoundQuery(value, false).mean();
+	}
+
+	/**
 	 * Finds the rows whose value is greater than or equal to {@code value}
 	 * (unsigned).
 	 *
@@ -528,6 +571,18 @@ public class SliceZ {
 	 */
 	public double sumGreaterThanOrEqual(long value) {
 		return value == 0L ? sumLessThanOrEqual(-1L) : sumGreaterThan(value - 1);
+	}
+
+	/**
+	 * Computes the arithmetic mean of the rows whose value is greater than or equal
+	 * to {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive lower bound
+	 * @return the mean of matching values, or {@code 0} if there are no matches
+	 */
+	public double meanGreaterThanOrEqual(long value) {
+		return value == 0L ? meanLessThanOrEqual(-1L) : meanGreaterThan(value - 1);
 	}
 
 	/**
@@ -611,6 +666,26 @@ public class SliceZ {
 	}
 
 	/**
+	 * Computes the arithmetic mean of the values of rows whose value equals any of
+	 * the given {@code values} (set membership).
+	 *
+	 * @param values
+	 *            the values to match; duplicates and ordering do not affect the
+	 *            result
+	 * @return the mean of matching values, or {@code 0} if {@code values} is empty
+	 *         or no rows match
+	 */
+	public double meanIn(long... values) {
+		if (values.length == 0) {
+			return 0D;
+		}
+		if (values.length == 1) {
+			return meanEqual(values[0]);
+		}
+		return new InQuery(values).mean();
+	}
+
+	/**
 	 * Counts the rows whose value equals {@code value}.
 	 *
 	 * @param value
@@ -644,6 +719,19 @@ public class SliceZ {
 	}
 
 	/**
+	 * Computes the arithmetic mean of the values equal to {@code value}. Since
+	 * every matching row holds exactly {@code value}, the result is {@code value}
+	 * when at least one row matches, or {@code 0} otherwise.
+	 *
+	 * @param value
+	 *            the value to match
+	 * @return {@code (double) value} if any row matches, {@code 0} otherwise
+	 */
+	public double meanEqual(long value) {
+		return countEqual(value) > 0 ? value : 0D;
+	}
+
+	/**
 	 * Sums the values not equal to {@code value}.
 	 *
 	 * @param value
@@ -654,6 +742,17 @@ public class SliceZ {
 		// fixme if we store the sum this can be computed faster by subtracting sumEqual
 		// from the global sum
 		return new EqualityQuery(value, true).sum();
+	}
+
+	/**
+	 * Computes the arithmetic mean of the values not equal to {@code value}.
+	 *
+	 * @param value
+	 *            the value to exclude
+	 * @return the mean of matching values, or {@code 0} if there are no matches
+	 */
+	public double meanNotEqual(long value) {
+		return new EqualityQuery(value, true).mean();
 	}
 
 	/**
@@ -722,6 +821,28 @@ public class SliceZ {
 			return 0;
 		}
 		return new BetweenQuery(lower - 1, upper - 1).sum();
+	}
+
+	/**
+	 * Computes the arithmetic mean of all values lying in the half-open unsigned
+	 * range {@code [lower, upper)} — that is, {@code lower <= v < upper} in
+	 * unsigned order. The lower bound is inclusive and the upper bound is
+	 * exclusive.
+	 *
+	 * @param lower
+	 *            the inclusive lower bound
+	 * @param upper
+	 *            the exclusive upper bound
+	 * @return the mean of matching values, or {@code 0} if there are no matches
+	 */
+	public double meanBetween(long lower, long upper) {
+		if (lower == 0L) {
+			return meanLessThan(upper);
+		}
+		if (Long.compareUnsigned(upper, lower) <= 0) {
+			return 0;
+		}
+		return new BetweenQuery(lower - 1, upper - 1).mean();
 	}
 
 	/**
@@ -802,6 +923,28 @@ public class SliceZ {
 			return 0L;
 		}
 		return new KTailValuesQuery(k, true).sumLongs();
+	}
+
+	/**
+	 * Computes the arithmetic mean of the {@code k} smallest values in unsigned
+	 * order. This is consistent with {@link #bottomValues(int)}: it averages the
+	 * same values that method would yield.
+	 *
+	 * @param k
+	 *            the number of values to average
+	 * @return the mean of the bottom-{@code k} values, or {@code 0} if {@code k} is
+	 *         zero
+	 * @throws IllegalArgumentException
+	 *             if {@code k} is negative
+	 */
+	public double bottomMean(int k) {
+		if (k < 0) {
+			throw new IllegalArgumentException("top-k negative k: " + k);
+		}
+		if (k == 0) {
+			return 0L;
+		}
+		return new KTailValuesQuery(k, true).mean();
 	}
 
 	/**
@@ -1176,6 +1319,15 @@ public class SliceZ {
 			return sum;
 		}
 
+		double mean() {
+			long[] keys = values.backingKeys();
+			double sum = 0D;
+			for (int i = 0; i < size; i++) {
+				sum += keys[i];
+			}
+			return sum / size;
+		}
+
 		double sumDoubles(LongToDoubleFunction encoding) {
 			long[] keys = values.backingKeys();
 			double sum = 0D;
@@ -1249,7 +1401,16 @@ public class SliceZ {
 			return matchingCount;
 		}
 
+		double mean() {
+			return aggregate(true);
+		}
+
 		double sum() {
+			return aggregate(false);
+		}
+
+		double aggregate(boolean normalise) {
+			long count = 0;
 			double sum = 0D;
 			while (base < rowCount) {
 				int snapshot = position;
@@ -1257,6 +1418,7 @@ public class SliceZ {
 				evaluateBlock();
 				int matchingCount = buffer.count(limit);
 				if (matchingCount > 0) {
+					count += matchingCount;
 					position = snapshot;
 					long typesHigh = data.getLong(position);
 					position += Long.BYTES;
@@ -1293,7 +1455,7 @@ public class SliceZ {
 				}
 				base += BLOCK_SIZE;
 			}
-			return sum;
+			return normalise && count != 0 ? sum / count : sum;
 		}
 
 		protected abstract void evaluateBlock();
