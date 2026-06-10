@@ -46,7 +46,7 @@ public class SliceZ {
 
 	static final int BLOCK_SIZE = 0x10000;
 	static final int BLOCK_WORDS = BLOCK_SIZE / Long.SIZE; // 16
-	private static final int SPARSE_THRESHOLD = BLOCK_SIZE / Short.SIZE - 1;
+	static final int SPARSE_THRESHOLD = BLOCK_SIZE / Short.SIZE - 1;
 
 	/**
 	 * Accumulates values in insertion order and produces an immutable

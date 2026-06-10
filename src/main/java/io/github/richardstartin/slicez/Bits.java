@@ -21,6 +21,14 @@ class Bits {
 		return full;
 	}
 
+	void setFull(boolean full) {
+		this.full = full;
+	}
+
+	void setEmpty(boolean empty) {
+		this.empty = empty;
+	}
+
 	boolean isEmpty() {
 		return empty;
 	}
