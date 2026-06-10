@@ -130,20 +130,18 @@ public class BooleanOperationsBenchmark {
 	@Benchmark
 	public void compressedBitmapAnd(CompressedBitmapState state, Blackhole bh) {
 		var it = state.x.and(state.y);
-		var bits = it.newBits();
 		while (it.hasNext()) {
-			bh.consume(it.nextBlock(bits));
-			bh.consume(bits);
+			bh.consume(it.nextBlock());
+			bh.consume(it.getBits());
 		}
 	}
 
 	@Benchmark
 	public void compressedBitmapOr(CompressedBitmapState state, Blackhole bh) {
 		var it = state.x.or(state.y);
-		var bits = it.newBits();
 		while (it.hasNext()) {
-			bh.consume(it.nextBlock(bits));
-			bh.consume(bits);
+			bh.consume(it.nextBlock());
+			bh.consume(it.getBits());
 		}
 	}
 

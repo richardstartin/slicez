@@ -12,7 +12,7 @@ public class CompressedBitmap {
 
 	private static final int COOKIE = 0xFEDC1234;
 
-	static final int HEADER_SIZE = Integer.SIZE + Integer.SIZE; // cookie + data offset
+	static final int HEADER_SIZE = Integer.BYTES + Integer.BYTES; // cookie + data offset
 	static final int DATA_OFFSET = Integer.BYTES;
 	static final int SHIFT = Long.bitCount(BLOCK_SIZE - 1);
 
@@ -34,6 +34,10 @@ public class CompressedBitmap {
 			int block = rid >>> SHIFT;
 			if (block > previousBlock) {
 				flush(block);
+			} else if (block < previousBlock) {
+				throw new IllegalStateException("values should be provided in ascending total order and "
+						+ "must be provided in ascending partial order in their high " + SHIFT + " bits. Value " + rid
+						+ " with high bits " + block + " was provided after values with high bits " + previousBlock);
 			}
 			bitmap[(rid & (BLOCK_SIZE - 1)) >>> 6] |= (1L << rid);
 		}
@@ -180,15 +184,27 @@ public class CompressedBitmap {
 	}
 
 	public BlockIterator blockIterator() {
-		return new ReadAllBlocks();
+		return blockIterator(new Bits());
+	}
+
+	BlockIterator blockIterator(Bits bits) {
+		return new ReadAllBlocks(bits);
 	}
 
 	public BlockIterator and(CompressedBitmap bitmap) {
-		return new And(bitmap);
+		return and(bitmap, new Bits());
+	}
+
+	BlockIterator and(CompressedBitmap bitmap, Bits bits) {
+		return new And(bitmap, bits);
 	}
 
 	public BlockIterator or(CompressedBitmap bitmap) {
-		return new Or(bitmap);
+		return or(bitmap, new Bits());
+	}
+
+	BlockIterator or(CompressedBitmap bitmap, Bits bits) {
+		return new Or(bitmap, bits);
 	}
 
 	public interface BlockIterator {
@@ -197,17 +213,17 @@ public class CompressedBitmap {
 			return new Bits();
 		}
 
+		Bits getBits();
+
 		/**
-		 * Decodes the next block into {@code bits}. The {@code empty} flag is not
-		 * maintained (these operations never yield empty blocks), but {@code bits} is
-		 * marked {@link Bits#isFull() full} when the decoded block is full.
+		 * Decodes the next block into {@code bits} which can be retrieved via
+		 * {@code getBits}. The {@code empty} flag is not maintained (these operations
+		 * never yield empty blocks), but {@code bits} is marked {@link Bits#isFull()
+		 * full} when the decoded block is full.
 		 *
-		 * @param bits
-		 *            the contents of the block as a bitset, must be sized to store all
-		 *            bits
 		 * @return the block id (i.e. the high bits of the values stored shifted right)
 		 */
-		int nextBlock(Bits bits);
+		int nextBlock();
 
 		/**
 		 * Whether any blocks remain
@@ -404,16 +420,18 @@ public class CompressedBitmap {
 
 	private class And implements BlockIterator {
 
-		private final Cursor a = newCursor();
-		private final Cursor b;
+		private final Cursor self = newCursor();
+		private final Cursor other;
+		private final Bits bits;
 		private boolean primed;
 		// a non-empty common block has been located and both cursors left parked on it,
 		// ready for nextBlock to materialise; stagedId is its block id
 		private boolean staged;
 		private int stagedId;
 
-		private And(CompressedBitmap other) {
-			this.b = other.newCursor();
+		private And(CompressedBitmap other, Bits bits) {
+			this.other = other.newCursor();
+			this.bits = bits;
 		}
 
 		@Override
@@ -425,165 +443,47 @@ public class CompressedBitmap {
 		}
 
 		@Override
-		public int nextBlock(Bits bits) {
+		public Bits getBits() {
+			return bits;
+		}
+
+		@Override
+		public int nextBlock() {
 			if (!staged && !stageNext()) {
 				throw new NoSuchElementException();
 			}
-			bits.setFull(intersect(bits.bits));
-			bits.setEmpty(false);
-			a.next();
-			b.next();
 			staged = false;
 			return stagedId;
 		}
 
 		/**
 		 * Merges the two block streams, skipping blocks absent from either side and any
-		 * common block whose intersection {@link #probe() probes} empty, and parks both
-		 * cursors on the first common block with a non-empty intersection.
+		 * common block whose intersection is empty, and materialises the first common
+		 * block with a non-empty intersection into {@code bits}.
 		 *
 		 * @return {@code true} if such a block was found
 		 */
 		private boolean stageNext() {
 			if (!primed) {
-				a.next();
-				b.next();
+				self.next();
+				other.next();
 				primed = true;
 			}
-			while (a.valid && b.valid) {
-				if (a.blockId < b.blockId) {
-					a.next();
-				} else if (a.blockId > b.blockId) {
-					b.next();
-				} else if (probe()) {
-					stagedId = a.blockId;
-					return true;
+			while (self.valid && other.valid) {
+				if (self.blockId < other.blockId) {
+					self.next();
+				} else if (self.blockId > other.blockId) {
+					other.next();
 				} else {
-					a.next();
-					b.next();
-				}
-			}
-			return false;
-		}
-
-		// -- probing: does the intersection of the parked blocks contain any bit? --
-		// Reads directly from the stored form and returns at the first common bit
-		// found.
-
-		/**
-		 * @return whether the two parked blocks intersect at all, without materialising
-		 *         the result. Operands are ordered by ascending type so each pair is
-		 *         handled once.
-		 */
-		private boolean probe() {
-			ByteBuffer da = a.data;
-			ByteBuffer db = b.data;
-			int pa = a.payload;
-			int pb = b.payload;
-			int ta = a.type;
-			int tb = b.type;
-			if (ta > tb) {
-				int t = ta;
-				ta = tb;
-				tb = t;
-				ByteBuffer d = da;
-				da = db;
-				db = d;
-				int p = pa;
-				pa = pb;
-				pb = p;
-			}
-			return switch (ta) {
-				case SPARSE -> switch (tb) {
-					case SPARSE -> sparseIntersectsSparse(da, pa, db, pb);
-					case SPARSE_INVERTED -> sparseIntersectsSparseInverted(da, pa, db, pb);
-					default -> sparseIntersectsDense(da, pa, db, pb);
-				};
-				case SPARSE_INVERTED -> switch (tb) {
-					// the two unset lists hold at most SPARSE_THRESHOLD entries each, so
-					// their union can never cover the block: always non-empty
-					case SPARSE_INVERTED -> true;
-					default -> invertedIntersectsDense(da, pa, db, pb);
-				};
-				default -> denseIntersectsDense(da, pa, db, pb);
-			};
-		}
-
-		private boolean sparseIntersectsSparse(ByteBuffer ba, int pa, ByteBuffer bb, int pb) {
-			int ca = ba.getChar(pa);
-			pa += Character.BYTES;
-			int cb = bb.getChar(pb);
-			pb += Character.BYTES;
-			int i = 0, j = 0;
-			while (i < ca && j < cb) {
-				int va = ba.getChar(pa + (i << 1));
-				int vb = bb.getChar(pb + (j << 1));
-				if (va < vb) {
-					i++;
-				} else if (va > vb) {
-					j++;
-				} else {
-					return true;
-				}
-			}
-			return false;
-		}
-
-		private boolean sparseIntersectsSparseInverted(ByteBuffer sparse, int ps, ByteBuffer inv, int pi) {
-			int cs = sparse.getChar(ps);
-			ps += Character.BYTES;
-			int ci = inv.getChar(pi);
-			pi += Character.BYTES;
-			int j = 0;
-			for (int i = 0; i < cs; i++) {
-				int v = sparse.getChar(ps + (i << 1));
-				while (j < ci && inv.getChar(pi + (j << 1)) < v) {
-					j++;
-				}
-				if (j == ci || inv.getChar(pi + (j << 1)) != v) {
-					return true; // v is set in the inverted block
-				}
-			}
-			return false;
-		}
-
-		private boolean sparseIntersectsDense(ByteBuffer sparse, int ps, ByteBuffer dense, int pd) {
-			int cs = sparse.getChar(ps);
-			ps += Character.BYTES;
-			for (int i = 0; i < cs; i++) {
-				int v = sparse.getChar(ps + (i << 1));
-				if ((dense.getLong(pd + (v >>> 6) * Long.BYTES) & (1L << v)) != 0L) {
-					return true;
-				}
-			}
-			return false;
-		}
-
-		private boolean invertedIntersectsDense(ByteBuffer inv, int pi, ByteBuffer dense, int pd) {
-			int ci = inv.getChar(pi);
-			pi += Character.BYTES;
-			int j = 0;
-			for (int w = 0; w < BLOCK_WORDS; w++) {
-				long word = dense.getLong(pd + w * Long.BYTES);
-				while (j < ci) {
-					int v = inv.getChar(pi + (j << 1));
-					if ((v >>> 6) != w) {
-						break;
+					int id = self.blockId;
+					boolean empty = intersect();
+					self.next();
+					other.next();
+					if (!empty) {
+						stagedId = id;
+						bits.setEmpty(false);
+						return true;
 					}
-					word &= ~(1L << v);
-					j++;
-				}
-				if (word != 0L) {
-					return true;
-				}
-			}
-			return false;
-		}
-
-		private boolean denseIntersectsDense(ByteBuffer ba, int pa, ByteBuffer bb, int pb) {
-			for (int i = 0; i < BLOCK_WORDS; i++) {
-				if ((ba.getLong(pa + i * Long.BYTES) & bb.getLong(pb + i * Long.BYTES)) != 0L) {
-					return true;
 				}
 			}
 			return false;
@@ -591,16 +491,17 @@ public class CompressedBitmap {
 
 		// -- materialising: write the intersection of the parked blocks into bits --
 		// Six methods, one per (ordered) type pair, reading directly from the stored
-		// form; each returns whether the result is full (only two full inverted blocks
-		// can intersect to a full block).
+		// form. Each materialises the result and reports whether it is empty so empty
+		// intersections can be skipped; fullness (only two full inverted blocks can
+		// intersect to a full block) is recorded on bits by the dispatcher.
 
-		private boolean intersect(long[] bits) {
-			ByteBuffer da = a.data;
-			ByteBuffer db = b.data;
-			int pa = a.payload;
-			int pb = b.payload;
-			int ta = a.type;
-			int tb = b.type;
+		private boolean intersect() {
+			ByteBuffer da = self.data;
+			ByteBuffer db = other.data;
+			int pa = self.payload;
+			int pb = other.payload;
+			int ta = self.type;
+			int tb = other.type;
 			if (ta > tb) {
 				int t = ta;
 				ta = tb;
@@ -612,18 +513,27 @@ public class CompressedBitmap {
 				pa = pb;
 				pb = p;
 			}
-			return switch (ta) {
-				case SPARSE -> switch (tb) {
-					case SPARSE -> sparseAndSparse(bits, da, pa, db, pb);
-					case SPARSE_INVERTED -> sparseAndSparseInverted(bits, da, pa, db, pb);
-					default -> sparseAndDense(bits, da, pa, db, pb);
+			long[] words = bits.bits;
+			boolean empty;
+			boolean full = false;
+			switch (ta) {
+				case SPARSE -> empty = switch (tb) {
+					case SPARSE -> sparseAndSparse(words, da, pa, db, pb);
+					case SPARSE_INVERTED -> sparseAndSparseInverted(words, da, pa, db, pb);
+					default -> sparseAndDense(words, da, pa, db, pb);
 				};
-				case SPARSE_INVERTED -> switch (tb) {
-					case SPARSE_INVERTED -> sparseInvertedAndSparseInverted(bits, da, pa, db, pb);
-					default -> sparseInvertedAndDense(bits, da, pa, db, pb);
-				};
-				default -> denseAndDense(bits, da, pa, db, pb);
-			};
+				case SPARSE_INVERTED -> {
+					if (tb == SPARSE_INVERTED) {
+						full = sparseInvertedAndSparseInverted(words, da, pa, db, pb);
+						empty = false;
+					} else {
+						empty = sparseInvertedAndDense(words, da, pa, db, pb);
+					}
+				}
+				default -> empty = denseAndDense(words, da, pa, db, pb);
+			}
+			bits.setFull(full);
+			return empty;
 		}
 
 		private boolean sparseAndSparse(long[] bits, ByteBuffer ba, int pa, ByteBuffer bb, int pb) {
@@ -632,6 +542,7 @@ public class CompressedBitmap {
 			pa += Character.BYTES;
 			int cb = bb.getChar(pb);
 			pb += Character.BYTES;
+			boolean any = false;
 			int i = 0, j = 0;
 			while (i < ca && j < cb) {
 				int va = ba.getChar(pa + (i << 1));
@@ -642,11 +553,12 @@ public class CompressedBitmap {
 					j++;
 				} else {
 					bits[va >>> 6] |= 1L << va;
+					any = true;
 					i++;
 					j++;
 				}
 			}
-			return false; // at most SPARSE_THRESHOLD bits, never full
+			return !any; // never full: at most SPARSE_THRESHOLD bits
 		}
 
 		private boolean sparseAndSparseInverted(long[] bits, ByteBuffer sparse, int ps, ByteBuffer inv, int pi) {
@@ -656,6 +568,7 @@ public class CompressedBitmap {
 			ps += Character.BYTES;
 			int ci = inv.getChar(pi);
 			pi += Character.BYTES;
+			boolean any = false;
 			int j = 0;
 			for (int i = 0; i < cs; i++) {
 				int v = sparse.getChar(ps + (i << 1));
@@ -664,9 +577,10 @@ public class CompressedBitmap {
 				}
 				if (j == ci || inv.getChar(pi + (j << 1)) != v) {
 					bits[v >>> 6] |= 1L << v;
+					any = true;
 				}
 			}
-			return false; // result is a subset of the sparse block, never full
+			return !any; // never full: result is a subset of the sparse block
 		}
 
 		private boolean sparseAndDense(long[] bits, ByteBuffer sparse, int ps, ByteBuffer dense, int pd) {
@@ -674,18 +588,21 @@ public class CompressedBitmap {
 			Arrays.fill(bits, 0L);
 			int cs = sparse.getChar(ps);
 			ps += Character.BYTES;
+			boolean any = false;
 			for (int i = 0; i < cs; i++) {
 				int v = sparse.getChar(ps + (i << 1));
 				if ((dense.getLong(pd + (v >>> 6) * Long.BYTES) & (1L << v)) != 0L) {
 					bits[v >>> 6] |= 1L << v;
+					any = true;
 				}
 			}
-			return false; // result is a subset of the sparse block, never full
+			return !any; // never full: result is a subset of the sparse block
 		}
 
 		private boolean sparseInvertedAndSparseInverted(long[] bits, ByteBuffer ba, int pa, ByteBuffer bb, int pb) {
 			// everything except the union of the two unset lists; with both counts zero
-			// this leaves the block full, the only way an intersection can be full
+			// this leaves the block full, the only way an intersection can be full. Never
+			// empty (the two unset lists cannot cover the block), so this returns fullness
 			Arrays.fill(bits, -1L);
 			int ca = ba.getChar(pa);
 			pa += Character.BYTES;
@@ -713,68 +630,99 @@ public class CompressedBitmap {
 				int v = inv.getChar(pi + (i << 1));
 				bits[v >>> 6] &= ~(1L << v);
 			}
-			return false; // result is a subset of the dense block, never full
+			boolean empty = true;
+			for (int i = 0; i < BLOCK_WORDS && empty; i += 8) {
+				empty = 0L == (bits[i] | bits[i + 1] | bits[i + 2] | bits[i + 3] | bits[i + 4] | bits[i + 5]
+						| bits[i + 6] | bits[i + 7]);
+			}
+			return empty;
 		}
 
 		private boolean denseAndDense(long[] bits, ByteBuffer ba, int pa, ByteBuffer bb, int pb) {
+			long acc = 0L;
 			for (int i = 0; i < BLOCK_WORDS; i++) {
-				bits[i] = ba.getLong(pa + i * Long.BYTES) & bb.getLong(pb + i * Long.BYTES);
+				long word = ba.getLong(pa + i * Long.BYTES) & bb.getLong(pb + i * Long.BYTES);
+				bits[i] = word;
+				acc |= word;
 			}
-			return false; // result is a subset of each dense block, never full
+			return acc == 0L; // empty when no positions are common
 		}
 	}
 
 	private class Or implements BlockIterator {
 
-		private final Cursor a = newCursor();
-		private final Cursor b;
+		private final Cursor self = newCursor();
+		private final Cursor other;
+		private final Bits bits;
 		private boolean primed;
+		private boolean staged;
+		private int stagedId;
 
-		private Or(CompressedBitmap other) {
-			this.b = other.newCursor();
+		private Or(CompressedBitmap other, Bits bits) {
+			this.other = other.newCursor();
+			this.bits = bits;
 		}
 
 		@Override
 		public boolean hasNext() {
-			prime();
-			// a block belongs to the union whenever it is present in either bitmap, and
-			// the union of a present block always has bits, so nothing is ever skipped
-			return a.valid || b.valid;
+			if (!staged) {
+				staged = advance();
+			}
+			return staged;
 		}
 
 		@Override
-		public int nextBlock(Bits bits) {
-			prime();
-			if (!a.valid && !b.valid) {
+		public Bits getBits() {
+			return bits;
+		}
+
+		@Override
+		public int nextBlock() {
+			if (!staged && !advance()) {
 				throw new NoSuchElementException();
 			}
+			staged = false;
+			return stagedId;
+		}
+
+		/**
+		 * Advances to the next block present in either bitmap and materialises it into
+		 * {@code bits} - a block present on only one side as-is, a shared block as the
+		 * union of the two. A union block always has bits, so nothing is ever skipped.
+		 *
+		 * @return {@code true} if a block was found
+		 */
+		private boolean advance() {
+			prime();
+			if (!self.valid && !other.valid) {
+				return false;
+			}
 			long[] words = bits.bits;
-			int blockId;
 			boolean full;
-			if (a.valid && (!b.valid || a.blockId < b.blockId)) {
-				blockId = a.blockId;
-				full = decode(words, a);
-				a.next();
-			} else if (b.valid && (!a.valid || b.blockId < a.blockId)) {
-				blockId = b.blockId;
-				full = decode(words, b);
-				b.next();
+			if (self.valid && (!other.valid || self.blockId < other.blockId)) {
+				stagedId = self.blockId;
+				full = decode(words, self);
+				self.next();
+			} else if (other.valid && (!self.valid || other.blockId < self.blockId)) {
+				stagedId = other.blockId;
+				full = decode(words, other);
+				other.next();
 			} else {
 				// present in both bitmaps at the same block id: take the union
-				blockId = a.blockId;
+				stagedId = self.blockId;
 				full = union(words);
-				a.next();
-				b.next();
+				self.next();
+				other.next();
 			}
 			bits.setFull(full);
 			bits.setEmpty(false);
-			return blockId;
+			return true;
 		}
 
 		private void prime() {
 			if (!primed) {
-				a.next();
-				b.next();
+				self.next();
+				other.next();
 				primed = true;
 			}
 		}
@@ -828,12 +776,12 @@ public class CompressedBitmap {
 		// sparse blocks can produce a full result).
 
 		private boolean union(long[] bits) {
-			ByteBuffer da = a.data;
-			ByteBuffer db = b.data;
-			int pa = a.payload;
-			int pb = b.payload;
-			int ta = a.type;
-			int tb = b.type;
+			ByteBuffer da = self.data;
+			ByteBuffer db = other.data;
+			int pa = self.payload;
+			int pb = other.payload;
+			int ta = self.type;
+			int tb = other.type;
 			if (ta > tb) {
 				int t = ta;
 				ta = tb;
@@ -977,21 +925,48 @@ public class CompressedBitmap {
 		private int metadataPosition = HEADER_SIZE;
 		private int dataPosition = data.getInt(DATA_OFFSET);
 		private final int dataEnd = data.limit();
+		private final Bits bits;
 
 		// type mask covering the current group of 64 blocks
 		private long typesHigh;
 		private long typesLow;
 		private int blockIndex;
+		private boolean staged;
+		private int stagedId;
 
-		@Override
-		public boolean hasNext() {
-			// every stored block consumes payload, so leftover payload means another
-			// present block remains; ABSENT gaps carry no payload
-			return dataPosition < dataEnd;
+		private ReadAllBlocks(Bits bits) {
+			this.bits = bits;
 		}
 
 		@Override
-		public int nextBlock(Bits bits) {
+		public Bits getBits() {
+			return bits;
+		}
+
+		@Override
+		public boolean hasNext() {
+			if (!staged) {
+				staged = advance();
+			}
+			return staged;
+		}
+
+		@Override
+		public int nextBlock() {
+			if (!staged && !advance()) {
+				throw new NoSuchElementException();
+			}
+			staged = false;
+			return stagedId;
+		}
+
+		/**
+		 * Advances past any ABSENT blocks and decodes the next present block into
+		 * {@code bits}.
+		 *
+		 * @return {@code true} if a block was found, {@code false} once exhausted
+		 */
+		private boolean advance() {
 			long[] words = bits.bits;
 			while (dataPosition < dataEnd) {
 				if ((blockIndex & 63) == 0) {
@@ -1007,23 +982,26 @@ public class CompressedBitmap {
 					case SPARSE -> {
 						decodeSparse(words);
 						bits.setFull(false);
-						return blockId;
+						stagedId = blockId;
+						return true;
 					}
 					case SPARSE_INVERTED -> {
 						bits.setFull(decodeSparseInverted(words));
-						return blockId;
+						stagedId = blockId;
+						return true;
 					}
 					case DENSE -> {
 						decodeDense(words);
 						bits.setFull(false);
-						return blockId;
+						stagedId = blockId;
+						return true;
 					}
 					default -> {
 						// ABSENT - no payload, no set bits; skip to the next block
 					}
 				}
 			}
-			throw new NoSuchElementException();
+			return false;
 		}
 
 		private void decodeSparse(long[] bits) {

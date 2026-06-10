@@ -211,11 +211,10 @@ class TestCompressedBitmap {
 		var appender = CompressedBitmap.appender();
 		appender.add(42);
 		var it = appender.build().blockIterator();
-		var bits = it.newBits();
 		assertTrue(it.hasNext());
-		it.nextBlock(bits);
+		it.nextBlock();
 		assertFalse(it.hasNext());
-		assertThrows(java.util.NoSuchElementException.class, () -> it.nextBlock(bits));
+		assertThrows(java.util.NoSuchElementException.class, () -> it.nextBlock());
 	}
 
 	@Test
@@ -226,18 +225,18 @@ class TestCompressedBitmap {
 		appender.add(3 * BLOCK + 1);
 		appender.add(5 * BLOCK + 2);
 		var it = appender.build().blockIterator();
-		var bits = it.newBits();
+		var bits = it.getBits();
 
 		assertTrue(it.hasNext());
-		assertEquals(0, it.nextBlock(bits));
+		assertEquals(0, it.nextBlock());
 		assertEquals(10, singleSetBit(bits.bits));
 
 		assertTrue(it.hasNext());
-		assertEquals(3, it.nextBlock(bits));
+		assertEquals(3, it.nextBlock());
 		assertEquals(1, singleSetBit(bits.bits));
 
 		assertTrue(it.hasNext());
-		assertEquals(5, it.nextBlock(bits));
+		assertEquals(5, it.nextBlock());
 		assertEquals(2, singleSetBit(bits.bits));
 
 		assertFalse(it.hasNext());
@@ -253,12 +252,12 @@ class TestCompressedBitmap {
 		}
 		appender.add(BLOCK + 7);
 		var it = appender.build().blockIterator();
-		var bits = it.newBits();
+		var bits = it.getBits();
 
-		assertEquals(0, it.nextBlock(bits));
+		assertEquals(0, it.nextBlock());
 		assertEquals(BLOCK / 2, cardinality(bits.bits));
 
-		assertEquals(1, it.nextBlock(bits));
+		assertEquals(1, it.nextBlock());
 		assertEquals(7, singleSetBit(bits.bits));
 	}
 
@@ -353,12 +352,12 @@ class TestCompressedBitmap {
 	 * block reported {@link Bits#isFull() full} really does hold every bit.
 	 */
 	private static int[] collectBlocks(CompressedBitmap.BlockIterator it) {
-		Bits bits = it.newBits();
+		Bits bits = it.getBits();
 		int[] buf = new int[256];
 		int n = 0;
 		int previousBlock = -1;
 		while (it.hasNext()) {
-			int blockId = it.nextBlock(bits);
+			int blockId = it.nextBlock();
 			assertTrue(blockId > previousBlock, "block ids must be strictly ascending");
 			previousBlock = blockId;
 			int base = blockId * BLOCK;
@@ -461,9 +460,9 @@ class TestCompressedBitmap {
 		assertAnd(toArray(a), toArray(b));
 
 		var it = build(toArray(a)).and(build(toArray(b)));
-		var bits = it.newBits();
+		var bits = it.getBits();
 		assertTrue(it.hasNext());
-		assertEquals(1, it.nextBlock(bits));
+		assertEquals(1, it.nextBlock());
 		assertEquals(5, singleSetBit(bits.bits));
 		assertFalse(it.hasNext());
 	}
@@ -484,11 +483,10 @@ class TestCompressedBitmap {
 	@Test
 	void andThrowsWhenExhausted() {
 		var it = build(new int[]{1}).and(build(new int[]{1}));
-		var bits = it.newBits();
 		assertTrue(it.hasNext());
-		it.nextBlock(bits);
+		it.nextBlock();
 		assertFalse(it.hasNext());
-		assertThrows(java.util.NoSuchElementException.class, () -> it.nextBlock(bits));
+		assertThrows(java.util.NoSuchElementException.class, () -> it.nextBlock());
 	}
 
 	@Test
@@ -511,9 +509,9 @@ class TestCompressedBitmap {
 		assertEquals(BLOCK, collectViaAnd(build(full), build(full)).length);
 
 		var it = build(full).and(build(full));
-		var bits = it.newBits();
+		var bits = it.getBits();
 		assertTrue(it.hasNext());
-		it.nextBlock(bits);
+		it.nextBlock();
 		assertTrue(bits.isFull(), "intersection of two full blocks must be marked full");
 	}
 
@@ -585,13 +583,13 @@ class TestCompressedBitmap {
 	void orThrowsWhenExhausted() {
 		// distinct block ids -> two yielded blocks, then exhausted
 		var it = build(new int[]{1}).or(build(new int[]{BLOCK + 1}));
-		var bits = it.newBits();
+		var bits = it.getBits();
 		assertTrue(it.hasNext());
-		it.nextBlock(bits);
+		it.nextBlock();
 		assertTrue(it.hasNext());
-		it.nextBlock(bits);
+		it.nextBlock();
 		assertFalse(it.hasNext());
-		assertThrows(java.util.NoSuchElementException.class, () -> it.nextBlock(bits));
+		assertThrows(java.util.NoSuchElementException.class, () -> it.nextBlock());
 	}
 
 	@Test
@@ -611,9 +609,9 @@ class TestCompressedBitmap {
 		assertEquals(BLOCK, collectViaOr(build(full), build(full)).length);
 
 		var it = build(full).or(build(full));
-		var bits = it.newBits();
+		var bits = it.getBits();
 		assertTrue(it.hasNext());
-		it.nextBlock(bits);
+		it.nextBlock();
 		assertTrue(bits.isFull(), "union of two full blocks must be marked full");
 	}
 
@@ -629,9 +627,9 @@ class TestCompressedBitmap {
 		assertOr(toArray(even), toArray(odd));
 
 		var it = build(toArray(even)).or(build(toArray(odd)));
-		var bits = it.newBits();
+		var bits = it.getBits();
 		assertTrue(it.hasNext());
-		it.nextBlock(bits);
+		it.nextBlock();
 		assertTrue(bits.isFull(), "a union that covers the block must be marked full");
 		assertFalse(it.hasNext());
 	}
