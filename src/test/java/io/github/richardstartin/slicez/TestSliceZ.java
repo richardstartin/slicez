@@ -10,6 +10,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.roaringbitmap.RangeBitmap;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.PrimitiveIterator;
 import java.util.Random;
@@ -1283,5 +1284,80 @@ class TestSliceZ {
 		var idx = build(0, 2);
 		assertArrayEquals(new int[0], collect(idx.equal(1)));
 		assertEquals(0, idx.countEqual(1));
+	}
+
+	// -------------------------------------------------------------------------
+	// serialize / map round trip
+	// -------------------------------------------------------------------------
+
+	@Test
+	void serializeAndMapPreservesMinMax() {
+		var idx = build(3, 1, 4, 1, 5, 9, 2, 6);
+		var mapped = SliceZ.map(idx.serialize());
+		assertEquals(idx.min(), mapped.min());
+		assertEquals(idx.max(), mapped.max());
+	}
+
+	@Test
+	void serializeAndMapPreservesQueryResults() {
+		long[] values = {1, 5, 3, 7, 2, 8, 4, 6};
+		var idx = SliceZ.build(values);
+		var mapped = SliceZ.map(idx.serialize());
+
+		assertArrayEquals(collect(idx.lessThanOrEqual(4)), collect(mapped.lessThanOrEqual(4)));
+		assertEquals(idx.countLessThanOrEqual(4), mapped.countLessThanOrEqual(4));
+		assertEquals(idx.sumLessThanOrEqual(4), mapped.sumLessThanOrEqual(4), 1e-9);
+		assertEquals(idx.meanLessThanOrEqual(4), mapped.meanLessThanOrEqual(4), 1e-9);
+
+		assertArrayEquals(collect(idx.greaterThan(5)), collect(mapped.greaterThan(5)));
+		assertEquals(idx.countGreaterThan(5), mapped.countGreaterThan(5));
+
+		assertArrayEquals(collect(idx.equal(3)), collect(mapped.equal(3)));
+		assertEquals(idx.countEqual(3), mapped.countEqual(3));
+
+		assertArrayEquals(collect(idx.between(3, 7)), collect(mapped.between(3, 7)));
+		assertEquals(idx.countBetween(3, 7), mapped.countBetween(3, 7));
+		assertEquals(idx.sumBetween(3, 7), mapped.sumBetween(3, 7), 1e-9);
+		assertEquals(idx.meanBetween(3, 7), mapped.meanBetween(3, 7), 1e-9);
+
+		assertArrayEquals(collect(idx.in(2, 5, 8)), collect(mapped.in(2, 5, 8)));
+		assertEquals(idx.countIn(2, 5, 8), mapped.countIn(2, 5, 8));
+	}
+
+	@Test
+	void serializeAndMapPreservesMultiBlockQueryResults() {
+		int n = 3 * BLOCK_SIZE;
+		var appender = SliceZ.appender();
+		var random = new SplittableRandom(42);
+		long[] values = new long[n];
+		for (int i = 0; i < n; i++) {
+			values[i] = random.nextLong(0, 1_000_000);
+			appender.add(values[i]);
+		}
+		var idx = appender.build();
+		var mapped = SliceZ.map(idx.serialize());
+		long threshold = 500_000;
+
+		assertArrayEquals(collect(idx.lessThanOrEqual(threshold)), collect(mapped.lessThanOrEqual(threshold)));
+		assertEquals(idx.countLessThanOrEqual(threshold), mapped.countLessThanOrEqual(threshold));
+		assertEquals(idx.sumLessThanOrEqual(threshold), mapped.sumLessThanOrEqual(threshold), 1e-3);
+		assertEquals(idx.meanLessThanOrEqual(threshold), mapped.meanLessThanOrEqual(threshold), 1e-9);
+
+		assertArrayEquals(collect(idx.greaterThan(threshold)), collect(mapped.greaterThan(threshold)));
+		assertEquals(idx.countGreaterThan(threshold), mapped.countGreaterThan(threshold));
+
+		assertArrayEquals(collect(idx.between(200_000, 800_000)), collect(mapped.between(200_000, 800_000)));
+		assertEquals(idx.countBetween(200_000, 800_000), mapped.countBetween(200_000, 800_000));
+	}
+
+	@Test
+	void serializeIsReadOnly() {
+		assertTrue(build(1L, 2L, 3L).serialize().isReadOnly());
+	}
+
+	@Test
+	void mapRejectsCorruptData() {
+		var garbage = ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN);
+		assertThrows(IllegalArgumentException.class, () -> SliceZ.map(garbage));
 	}
 }

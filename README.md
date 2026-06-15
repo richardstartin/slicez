@@ -133,6 +133,64 @@ double threshold = 3.14;
 PrimitiveIterator.OfInt it = index.lessThanOrEqual(ordinal(threshold));
 ```
 
+### Persistence
+
+Both `SliceZ` and `BlockedBitmap` can be written to disk and mapped back without copying the data.
+
+#### Serializing to disk
+
+`serialize()` returns a read-only `ByteBuffer` (little-endian) containing the raw binary data. Write it to a file with a `FileChannel`:
+
+```java
+SliceZ index = ...;
+Path path = Path.of("index.bin");
+
+ByteBuffer data = index.serialize();
+try (FileChannel ch = FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
+    while (data.hasRemaining()) {
+        ch.write(data);
+    }
+}
+```
+
+`BlockedBitmap` works identically:
+
+```java
+BlockedBitmap bitmap = ...;
+ByteBuffer data = bitmap.serialize();
+try (FileChannel ch = FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
+    while (data.hasRemaining()) {
+        ch.write(data);
+    }
+}
+```
+
+#### Mapping from disk
+
+`SliceZ.map(ByteBuffer)` and `BlockedBitmap.map(ByteBuffer)` accept any `ByteBuffer`, including a `MappedByteBuffer` produced by `FileChannel.map`. The data is used in-place — no copy is made. The channel can be closed after the mapping is established; the mapped region remains accessible for the lifetime of the returned object.
+
+```java
+SliceZ index;
+try (FileChannel ch = FileChannel.open(path, StandardOpenOption.READ)) {
+    MappedByteBuffer mmap = ch.map(FileChannel.MapMode.READ_ONLY, 0, ch.size());
+    mmap.order(ByteOrder.LITTLE_ENDIAN);
+    index = SliceZ.map(mmap);
+}
+// index is ready; queries run directly against the mapped memory
+long count = index.countLessThanOrEqual(threshold);
+```
+
+```java
+BlockedBitmap bitmap;
+try (FileChannel ch = FileChannel.open(path, StandardOpenOption.READ)) {
+    MappedByteBuffer mmap = ch.map(FileChannel.MapMode.READ_ONLY, 0, ch.size());
+    mmap.order(ByteOrder.LITTLE_ENDIAN);
+    bitmap = BlockedBitmap.map(mmap);
+}
+```
+
+Both `map` methods validate a magic cookie at the start of the buffer and throw `IllegalArgumentException` if the data is not a valid serialized `SliceZ` or `BlockedBitmap` respectively.
+
 ---
 
 ## Implementation
