@@ -8,7 +8,7 @@ import java.util.PrimitiveIterator;
 
 import static io.github.richardstartin.slicez.SliceZ.*;
 
-public class CompressedBitmap {
+public class BlockedBitmap {
 
 	private static final int COOKIE = 0xFEDC1234;
 
@@ -130,7 +130,7 @@ public class CompressedBitmap {
 			return cardinality;
 		}
 
-		public CompressedBitmap build() {
+		public BlockedBitmap build() {
 			// encode the final buffered block and flush the in-progress type mask word
 			if (previousBlock >= 0) {
 				appendBlock(previousBlock);
@@ -144,7 +144,7 @@ public class CompressedBitmap {
 			data.put(blocks);
 			data.putInt(0, COOKIE);
 			data.putInt(Integer.BYTES, metadata.limit());
-			return new CompressedBitmap(data);
+			return new BlockedBitmap(data);
 		}
 
 		private void ensureMetadataCapacity(int required) {
@@ -175,7 +175,10 @@ public class CompressedBitmap {
 
 	private final ByteBuffer data;
 
-	CompressedBitmap(ByteBuffer data) {
+	BlockedBitmap(ByteBuffer data) {
+		if (data.getInt(0) != COOKIE) {
+			throw new IllegalArgumentException("Something other than a valid blocked bitmap " + "was provided as data");
+		}
 		this.data = data;
 	}
 
@@ -191,44 +194,20 @@ public class CompressedBitmap {
 		return new ReadAllBlocks(bits);
 	}
 
-	public BlockIterator and(CompressedBitmap bitmap) {
+	public BlockIterator and(BlockedBitmap bitmap) {
 		return and(bitmap, new Bits());
 	}
 
-	BlockIterator and(CompressedBitmap bitmap, Bits bits) {
+	BlockIterator and(BlockedBitmap bitmap, Bits bits) {
 		return new And(bitmap, bits);
 	}
 
-	public BlockIterator or(CompressedBitmap bitmap) {
+	public BlockIterator or(BlockedBitmap bitmap) {
 		return or(bitmap, new Bits());
 	}
 
-	BlockIterator or(CompressedBitmap bitmap, Bits bits) {
+	BlockIterator or(BlockedBitmap bitmap, Bits bits) {
 		return new Or(bitmap, bits);
-	}
-
-	public interface BlockIterator {
-
-		default Bits newBits() {
-			return new Bits();
-		}
-
-		Bits getBits();
-
-		/**
-		 * Decodes the next block into {@code bits} which can be retrieved via
-		 * {@code getBits}. The {@code empty} flag is not maintained (these operations
-		 * never yield empty blocks), but {@code bits} is marked {@link Bits#isFull()
-		 * full} when the decoded block is full.
-		 *
-		 * @return the block id (i.e. the high bits of the values stored shifted right)
-		 */
-		int nextBlock();
-
-		/**
-		 * Whether any blocks remain
-		 */
-		boolean hasNext();
 	}
 
 	private Cursor newCursor() {
@@ -429,7 +408,7 @@ public class CompressedBitmap {
 		private boolean staged;
 		private int stagedId;
 
-		private And(CompressedBitmap other, Bits bits) {
+		private And(BlockedBitmap other, Bits bits) {
 			this.other = other.newCursor();
 			this.bits = bits;
 		}
@@ -658,7 +637,7 @@ public class CompressedBitmap {
 		private boolean staged;
 		private int stagedId;
 
-		private Or(CompressedBitmap other, Bits bits) {
+		private Or(BlockedBitmap other, Bits bits) {
 			this.other = other.newCursor();
 			this.bits = bits;
 		}

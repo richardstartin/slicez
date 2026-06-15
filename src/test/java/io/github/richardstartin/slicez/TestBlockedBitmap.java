@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Execution(ExecutionMode.CONCURRENT)
-class TestCompressedBitmap {
+class TestBlockedBitmap {
 
 	private static final int BLOCK = 1 << 16;
 
@@ -31,7 +31,7 @@ class TestCompressedBitmap {
 	 * the input.
 	 */
 	private static void assertRoundTrip(int[] rids) {
-		var appender = CompressedBitmap.appender();
+		var appender = BlockedBitmap.appender();
 		for (int rid : rids) {
 			appender.add(rid);
 		}
@@ -56,7 +56,7 @@ class TestCompressedBitmap {
 	 * Reconstructs all row ids by decoding each block via the block iterator and
 	 * combining the returned block id with the set bit positions.
 	 */
-	private static int[] collectViaBlocks(CompressedBitmap bitmap) {
+	private static int[] collectViaBlocks(BlockedBitmap bitmap) {
 		return collectBlocks(bitmap.blockIterator());
 	}
 
@@ -71,7 +71,7 @@ class TestCompressedBitmap {
 
 	@Test
 	void emptyIteratorHasNoNext() {
-		assertFalse(CompressedBitmap.appender().build().iterator().hasNext());
+		assertFalse(BlockedBitmap.appender().build().iterator().hasNext());
 	}
 
 	@Test
@@ -203,12 +203,12 @@ class TestCompressedBitmap {
 
 	@Test
 	void blockIteratorEmptyHasNoNext() {
-		assertFalse(CompressedBitmap.appender().build().blockIterator().hasNext());
+		assertFalse(BlockedBitmap.appender().build().blockIterator().hasNext());
 	}
 
 	@Test
 	void blockIteratorThrowsWhenExhausted() {
-		var appender = CompressedBitmap.appender();
+		var appender = BlockedBitmap.appender();
 		appender.add(42);
 		var it = appender.build().blockIterator();
 		assertTrue(it.hasNext());
@@ -219,7 +219,7 @@ class TestCompressedBitmap {
 
 	@Test
 	void blockIteratorReturnsHighBitsAndSkipsAbsentBlocks() {
-		var appender = CompressedBitmap.appender();
+		var appender = BlockedBitmap.appender();
 		// present blocks: 0, 3 and 5; blocks 1, 2 and 4 are absent
 		appender.add(10);
 		appender.add(3 * BLOCK + 1);
@@ -244,7 +244,7 @@ class TestCompressedBitmap {
 
 	@Test
 	void blockIteratorReusesBitsArrayWithoutStaleBits() {
-		var appender = CompressedBitmap.appender();
+		var appender = BlockedBitmap.appender();
 		// a dense block followed by a sparse block: decoding the sparse block must not
 		// leave behind any bits from the dense one in the reused buffer
 		for (int i = 0; i < BLOCK; i += 2) {
@@ -303,8 +303,8 @@ class TestCompressedBitmap {
 	private static final int DENSE_CARD = 30_000;
 	private static final int INVERTED_CARD = 64_800;
 
-	private static CompressedBitmap build(int[] rids) {
-		var appender = CompressedBitmap.appender();
+	private static BlockedBitmap build(int[] rids) {
+		var appender = BlockedBitmap.appender();
 		for (int rid : rids) {
 			appender.add(rid);
 		}
@@ -351,7 +351,7 @@ class TestCompressedBitmap {
 	 * come back strictly ascending, that no empty block is ever yielded, and that a
 	 * block reported {@link Bits#isFull() full} really does hold every bit.
 	 */
-	private static int[] collectBlocks(CompressedBitmap.BlockIterator it) {
+	private static int[] collectBlocks(BlockIterator it) {
 		Bits bits = it.getBits();
 		int[] buf = new int[256];
 		int n = 0;
@@ -382,11 +382,11 @@ class TestCompressedBitmap {
 		return Arrays.copyOf(buf, n);
 	}
 
-	private static int[] collectViaAnd(CompressedBitmap x, CompressedBitmap y) {
+	private static int[] collectViaAnd(BlockedBitmap x, BlockedBitmap y) {
 		return collectBlocks(x.and(y));
 	}
 
-	private static int[] collectViaOr(CompressedBitmap x, CompressedBitmap y) {
+	private static int[] collectViaOr(BlockedBitmap x, BlockedBitmap y) {
 		return collectBlocks(x.or(y));
 	}
 
