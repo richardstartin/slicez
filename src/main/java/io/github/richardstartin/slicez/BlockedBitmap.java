@@ -173,6 +173,20 @@ public class BlockedBitmap {
 		return new Appender();
 	}
 
+	/**
+	 * Maps a {@code BlockedBitmap} from the bytes without copying, supporting
+	 * memory-mapping etc.
+	 * 
+	 * @param data
+	 *            the serialized bitmap
+	 * @throws IllegalArgumentException
+	 *             if the data is not a {@code BlockedBitmap}
+	 * @return
+	 */
+	public static BlockedBitmap map(ByteBuffer data) {
+		return new BlockedBitmap(data);
+	}
+
 	private final ByteBuffer data;
 
 	BlockedBitmap(ByteBuffer data) {
@@ -180,6 +194,15 @@ public class BlockedBitmap {
 			throw new IllegalArgumentException("Something other than a valid blocked bitmap " + "was provided as data");
 		}
 		this.data = data;
+	}
+
+	/**
+	 * Serializes the data ready for writing to disk
+	 * 
+	 * @return a readonly view of the data.
+	 */
+	public ByteBuffer serialize() {
+		return data.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
 	}
 
 	public PrimitiveIterator.OfInt iterator() {

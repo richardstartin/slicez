@@ -8,6 +8,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.PrimitiveIterator;
 import java.util.SplittableRandom;
@@ -653,5 +655,85 @@ class TestBlockedBitmap {
 			}
 		}
 		assertOr(toArray(s1), toArray(s2));
+	}
+
+	// -------------------------------------------------------------------------
+	// serialize / map round trip
+	// -------------------------------------------------------------------------
+
+	@Test
+	void serializeAndMapPreservesEmpty() {
+		var mapped = BlockedBitmap.map(BlockedBitmap.appender().build().serialize());
+		assertFalse(mapped.iterator().hasNext());
+		assertFalse(mapped.blockIterator().hasNext());
+	}
+
+	@Test
+	void serializeAndMapPreservesSparse() {
+		var set = new java.util.TreeSet<Integer>();
+		addBlock(set, 0, SPARSE_CARD, 1);
+		int[] rids = toArray(set);
+		var mapped = BlockedBitmap.map(build(rids).serialize());
+		assertArrayEquals(rids, collect(mapped.iterator()), "bit iterator");
+		assertArrayEquals(rids, collectViaBlocks(mapped), "block iterator");
+	}
+
+	@Test
+	void serializeAndMapPreservesDense() {
+		var set = new java.util.TreeSet<Integer>();
+		addBlock(set, 0, DENSE_CARD, 1);
+		int[] rids = toArray(set);
+		var mapped = BlockedBitmap.map(build(rids).serialize());
+		assertArrayEquals(rids, collect(mapped.iterator()), "bit iterator");
+		assertArrayEquals(rids, collectViaBlocks(mapped), "block iterator");
+	}
+
+	@Test
+	void serializeAndMapPreservesSparseInverted() {
+		var set = new java.util.TreeSet<Integer>();
+		addBlock(set, 0, INVERTED_CARD, 1);
+		int[] rids = toArray(set);
+		var mapped = BlockedBitmap.map(build(rids).serialize());
+		assertArrayEquals(rids, collect(mapped.iterator()), "bit iterator");
+		assertArrayEquals(rids, collectViaBlocks(mapped), "block iterator");
+	}
+
+	@Test
+	void serializeAndMapPreservesMultiBlock() {
+		var set = new java.util.TreeSet<Integer>();
+		addBlock(set, 0, SPARSE_CARD, 1);
+		addBlock(set, 1, DENSE_CARD, 2);
+		addBlock(set, 3, INVERTED_CARD, 3); // block 2 is absent
+		int[] rids = toArray(set);
+		var mapped = BlockedBitmap.map(build(rids).serialize());
+		assertArrayEquals(rids, collect(mapped.iterator()), "bit iterator");
+		assertArrayEquals(rids, collectViaBlocks(mapped), "block iterator");
+	}
+
+	@Test
+	void serializeAndMapPreservesAndOr() {
+		var s1 = new java.util.TreeSet<Integer>();
+		var s2 = new java.util.TreeSet<Integer>();
+		addBlock(s1, 0, DENSE_CARD, 1);
+		addBlock(s1, 2, SPARSE_CARD, 3);
+		addBlock(s2, 0, SPARSE_CARD, 1); // same seed as s1 block 0 → subset, non-empty intersection
+		addBlock(s2, 1, INVERTED_CARD, 4);
+		int[] a = toArray(s1);
+		int[] b = toArray(s2);
+		var x = BlockedBitmap.map(build(a).serialize());
+		var y = BlockedBitmap.map(build(b).serialize());
+		assertArrayEquals(expectedIntersection(a, b), collectViaAnd(x, y), "and");
+		assertArrayEquals(expectedUnion(a, b), collectViaOr(x, y), "or");
+	}
+
+	@Test
+	void serializeIsReadOnly() {
+		assertTrue(build(new int[]{1, 2, 3}).serialize().isReadOnly());
+	}
+
+	@Test
+	void mapRejectsCorruptData() {
+		var garbage = ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN);
+		assertThrows(IllegalArgumentException.class, () -> BlockedBitmap.map(garbage));
 	}
 }

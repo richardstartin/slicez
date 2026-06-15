@@ -293,6 +293,20 @@ public class SliceZ {
 		return appender.build();
 	}
 
+	/**
+	 * Maps a {@code SliceZ} to the underlying data without copying it, supporting
+	 * memory-mapping etc.
+	 *
+	 * @param data
+	 *            a valid serialized SliceZ
+	 * @throws IllegalArgumentException
+	 *             if the data is corrupt
+	 * @return
+	 */
+	public static SliceZ map(ByteBuffer data) {
+		return new SliceZ(data);
+	}
+
 	SliceZ(ByteBuffer data) {
 		this.data = data;
 		int cookie = data.getInt(0);
@@ -303,6 +317,15 @@ public class SliceZ {
 		this.rowCount = data.getInt(4);
 		this.min = data.getLong(8);
 		this.max = data.getLong(16);
+	}
+
+	/**
+	 * Serializes the data as a read-only view.
+	 * 
+	 * @return a readonly view of the data.
+	 */
+	public ByteBuffer serialize() {
+		return data.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
 	}
 
 	/**
