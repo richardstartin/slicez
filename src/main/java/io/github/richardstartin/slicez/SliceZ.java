@@ -417,13 +417,26 @@ public class SliceZ {
 	 * @return the matching row ids in ascending order
 	 */
 	public PrimitiveIterator.OfInt lessThanOrEqual(long value) {
+		return lessThanOrEqual(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Finds the rows whose value is less than or equal to {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive upper bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the matching row ids in ascending order
+	 */
+	public PrimitiveIterator.OfInt lessThanOrEqual(long value, BlockIterator filter) {
 		if (Long.compareUnsigned(value, min) < 0) {
 			return IntStream.empty().iterator();
 		}
-		if (Long.compareUnsigned(value, max) > 0) {
+		if (Long.compareUnsigned(value, max) > 0 && filter.isTrivial()) {
 			return IntStream.range(0, rowCount).iterator();
 		}
-		return new SingleBoundQuery(value, true).iterator();
+		return new SingleBoundQuery(filter, value, true).iterator();
 	}
 
 	/**
@@ -435,13 +448,27 @@ public class SliceZ {
 	 * @return the number of matching rows
 	 */
 	public int countLessThanOrEqual(long value) {
+		return countLessThanOrEqual(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Counts the rows whose value is less than or equal to {@code value}
+	 * (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive upper bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the number of matching rows
+	 */
+	public int countLessThanOrEqual(long value, BlockIterator filter) {
 		if (Long.compareUnsigned(value, min) < 0) {
 			return 0;
 		}
-		if (Long.compareUnsigned(value, max) > 0) {
+		if (Long.compareUnsigned(value, max) > 0 && filter.isTrivial()) {
 			return rowCount;
 		}
-		return new SingleBoundQuery(value, true).matchingCount();
+		return new SingleBoundQuery(filter, value, true).matchingCount();
 	}
 
 	/**
@@ -452,10 +479,23 @@ public class SliceZ {
 	 * @return the sum of matching values
 	 */
 	public double sumLessThanOrEqual(long value) {
+		return sumLessThanOrEqual(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Sums the rows whose value is less than or equal to {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive upper bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the sum of matching values
+	 */
+	public double sumLessThanOrEqual(long value, BlockIterator filter) {
 		if (Long.compareUnsigned(value, min) < 0) {
 			return 0;
 		}
-		return new SingleBoundQuery(value, true).sum();
+		return new SingleBoundQuery(filter, value, true).sum();
 	}
 
 	/**
@@ -467,10 +507,24 @@ public class SliceZ {
 	 * @return the mean of matching values, or {@code 0} if there are no matches
 	 */
 	public double meanLessThanOrEqual(long value) {
+		return meanLessThanOrEqual(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Computes the arithmetic mean of the rows whose value is less than or equal to
+	 * {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the inclusive upper bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the mean of matching values, or {@code 0} if there are no matches
+	 */
+	public double meanLessThanOrEqual(long value, BlockIterator filter) {
 		if (Long.compareUnsigned(value, min) < 0) {
 			return 0;
 		}
-		return new SingleBoundQuery(value, true).mean();
+		return new SingleBoundQuery(filter, value, true).mean();
 	}
 
 	/**
@@ -481,13 +535,26 @@ public class SliceZ {
 	 * @return the matching row ids in ascending order
 	 */
 	public PrimitiveIterator.OfInt greaterThan(long value) {
-		if (Long.compareUnsigned(value, min) < 0) {
+		return greaterThan(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Finds the rows whose value is strictly greater than {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive lower bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the matching row ids in ascending order
+	 */
+	public PrimitiveIterator.OfInt greaterThan(long value, BlockIterator filter) {
+		if (Long.compareUnsigned(value, min) < 0 && filter.isTrivial()) {
 			return IntStream.range(0, rowCount).iterator();
 		}
 		if (Long.compareUnsigned(value, max) > 0) {
 			return IntStream.empty().iterator();
 		}
-		return new SingleBoundQuery(value, false).iterator();
+		return new SingleBoundQuery(filter, value, false).iterator();
 	}
 
 	/**
@@ -499,13 +566,27 @@ public class SliceZ {
 	 * @return the number of matching rows
 	 */
 	public int countGreaterThan(long value) {
-		if (Long.compareUnsigned(value, min) < 0) {
+		return countGreaterThan(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Counts the rows whose value is strictly greater than {@code value}
+	 * (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive lower bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the number of matching rows
+	 */
+	public int countGreaterThan(long value, BlockIterator filter) {
+		if (Long.compareUnsigned(value, min) < 0 && filter.isTrivial()) {
 			return rowCount;
 		}
 		if (Long.compareUnsigned(value, max) > 0) {
 			return 0;
 		}
-		return new SingleBoundQuery(value, false).matchingCount();
+		return new SingleBoundQuery(filter, value, false).matchingCount();
 	}
 
 	/**
@@ -516,10 +597,23 @@ public class SliceZ {
 	 * @return the sum of matching values
 	 */
 	public double sumGreaterThan(long value) {
+		return sumGreaterThan(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Sums the rows whose value is strictly greater than {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive lower bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the sum of matching values
+	 */
+	public double sumGreaterThan(long value, BlockIterator filter) {
 		if (Long.compareUnsigned(value, max) > 0) {
 			return 0L;
 		}
-		return new SingleBoundQuery(value, false).sum();
+		return new SingleBoundQuery(filter, value, false).sum();
 	}
 
 	/**
@@ -531,10 +625,24 @@ public class SliceZ {
 	 * @return the mean of matching values, or {@code 0} if there are no matches
 	 */
 	public double meanGreaterThan(long value) {
+		return meanGreaterThan(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Computes the arithmetic mean of the rows whose value is strictly greater than
+	 * {@code value} (unsigned).
+	 *
+	 * @param value
+	 *            the exclusive lower bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the mean of matching values, or {@code 0} if there are no matches
+	 */
+	public double meanGreaterThan(long value, BlockIterator filter) {
 		if (Long.compareUnsigned(value, max) > 0) {
 			return 0L;
 		}
-		return new SingleBoundQuery(value, false).mean();
+		return new SingleBoundQuery(filter, value, false).mean();
 	}
 
 	/**
@@ -593,7 +701,20 @@ public class SliceZ {
 	 * @return the matching row ids in ascending order
 	 */
 	public PrimitiveIterator.OfInt equal(long value) {
-		return new EqualityQuery(value, false).iterator();
+		return equal(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Finds the rows whose value equals {@code value}.
+	 *
+	 * @param value
+	 *            the value to match
+	 * @param filter
+	 *            filters the input values
+	 * @return the matching row ids in ascending order
+	 */
+	public PrimitiveIterator.OfInt equal(long value, BlockIterator filter) {
+		return new EqualityQuery(filter, value, false).iterator();
 	}
 
 	/**
@@ -604,7 +725,20 @@ public class SliceZ {
 	 * @return the matching row ids in ascending order
 	 */
 	public PrimitiveIterator.OfInt notEqual(long value) {
-		return new EqualityQuery(value, true).iterator();
+		return notEqual(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Finds the rows whose value does not equal {@code value}.
+	 *
+	 * @param value
+	 *            the value to exclude
+	 * @param filter
+	 *            filters the input values
+	 * @return the matching row ids in ascending order
+	 */
+	public PrimitiveIterator.OfInt notEqual(long value, BlockIterator filter) {
+		return new EqualityQuery(filter, value, true).iterator();
 	}
 
 	/**
@@ -618,13 +752,29 @@ public class SliceZ {
 	 *         empty
 	 */
 	public PrimitiveIterator.OfInt in(long... values) {
+		return in(new IterateAllBlocks(rowCount), values);
+	}
+
+	/**
+	 * Finds the rows whose value equals any of the given {@code values} (set
+	 * membership).
+	 *
+	 * @param filter
+	 *            filters the input values
+	 * @param values
+	 *            the values to match; duplicates and ordering do not affect the
+	 *            result
+	 * @return the matching row ids in ascending order, empty if {@code values} is
+	 *         empty
+	 */
+	public PrimitiveIterator.OfInt in(BlockIterator filter, long... values) {
 		if (values.length == 0) {
 			return IntStream.empty().iterator();
 		}
 		if (values.length == 1) {
-			return equal(values[0]);
+			return equal(values[0], filter);
 		}
-		return new InQuery(values).iterator();
+		return new InQuery(filter, values).iterator();
 	}
 
 	/**
@@ -637,13 +787,28 @@ public class SliceZ {
 	 * @return the number of matching rows, or {@code 0} if {@code values} is empty
 	 */
 	public int countIn(long... values) {
+		return countIn(new IterateAllBlocks(rowCount), values);
+	}
+
+	/**
+	 * Counts the rows whose value equals any of the given {@code values} (set
+	 * membership).
+	 *
+	 * @param filter
+	 *            filters the input values
+	 * @param values
+	 *            the values to match; duplicates and ordering do not affect the
+	 *            result
+	 * @return the number of matching rows, or {@code 0} if {@code values} is empty
+	 */
+	public int countIn(BlockIterator filter, long... values) {
 		if (values.length == 0) {
 			return 0;
 		}
 		if (values.length == 1) {
-			return countEqual(values[0]);
+			return countEqual(values[0], filter);
 		}
-		return new InQuery(values).matchingCount();
+		return new InQuery(filter, values).matchingCount();
 	}
 
 	/**
@@ -656,13 +821,28 @@ public class SliceZ {
 	 * @return the sum of matching values, or {@code 0} if {@code values} is empty
 	 */
 	public double sumIn(long... values) {
+		return sumIn(new IterateAllBlocks(rowCount), values);
+	}
+
+	/**
+	 * Sums the values of rows whose value equals any of the given {@code values}
+	 * (set membership).
+	 *
+	 * @param filter
+	 *            filters the input values
+	 * @param values
+	 *            the values to match; duplicates and ordering do not affect the
+	 *            result
+	 * @return the sum of matching values, or {@code 0} if {@code values} is empty
+	 */
+	public double sumIn(BlockIterator filter, long... values) {
 		if (values.length == 0) {
 			return 0D;
 		}
 		if (values.length == 1) {
 			return sumEqual(values[0]);
 		}
-		return new InQuery(values).sum();
+		return new InQuery(filter, values).sum();
 	}
 
 	/**
@@ -676,13 +856,29 @@ public class SliceZ {
 	 *         or no rows match
 	 */
 	public double meanIn(long... values) {
+		return meanIn(new IterateAllBlocks(rowCount), values);
+	}
+
+	/**
+	 * Computes the arithmetic mean of the values of rows whose value equals any of
+	 * the given {@code values} (set membership).
+	 *
+	 * @param filter
+	 *            filters the input values
+	 * @param values
+	 *            the values to match; duplicates and ordering do not affect the
+	 *            result
+	 * @return the mean of matching values, or {@code 0} if {@code values} is empty
+	 *         or no rows match
+	 */
+	public double meanIn(BlockIterator filter, long... values) {
 		if (values.length == 0) {
 			return 0D;
 		}
 		if (values.length == 1) {
 			return meanEqual(values[0]);
 		}
-		return new InQuery(values).mean();
+		return new InQuery(filter, values).mean();
 	}
 
 	/**
@@ -693,7 +889,20 @@ public class SliceZ {
 	 * @return the number of matching rows
 	 */
 	public int countEqual(long value) {
-		return new EqualityQuery(value, false).matchingCount();
+		return countEqual(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Counts the rows whose value equals {@code value}.
+	 *
+	 * @param value
+	 *            the value to match
+	 * @param filter
+	 *            filters the input values
+	 * @return the number of matching rows
+	 */
+	public int countEqual(long value, BlockIterator filter) {
+		return new EqualityQuery(filter, value, false).matchingCount();
 	}
 
 	/**
@@ -704,7 +913,20 @@ public class SliceZ {
 	 * @return the number of matching rows
 	 */
 	public int countNotEqual(long value) {
-		return new EqualityQuery(value, true).matchingCount();
+		return countNotEqual(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Counts the rows whose value does not equal {@code value}.
+	 *
+	 * @param value
+	 *            the value to exclude
+	 * @param filter
+	 *            filters the input values
+	 * @return the number of matching rows
+	 */
+	public int countNotEqual(long value, BlockIterator filter) {
+		return new EqualityQuery(filter, value, true).matchingCount();
 	}
 
 	/**
@@ -739,9 +961,22 @@ public class SliceZ {
 	 * @return the sum of matching values
 	 */
 	public double sumNotEqual(long value) {
+		return sumNotEqual(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Sums the values not equal to {@code value}.
+	 *
+	 * @param value
+	 *            the value to exclude
+	 * @param filter
+	 *            filters the input values
+	 * @return the sum of matching values
+	 */
+	public double sumNotEqual(long value, BlockIterator filter) {
 		// fixme if we store the sum this can be computed faster by subtracting sumEqual
 		// from the global sum
-		return new EqualityQuery(value, true).sum();
+		return new EqualityQuery(filter, value, true).sum();
 	}
 
 	/**
@@ -752,7 +987,20 @@ public class SliceZ {
 	 * @return the mean of matching values, or {@code 0} if there are no matches
 	 */
 	public double meanNotEqual(long value) {
-		return new EqualityQuery(value, true).mean();
+		return meanNotEqual(value, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Computes the arithmetic mean of the values not equal to {@code value}.
+	 *
+	 * @param value
+	 *            the value to exclude
+	 * @param filter
+	 *            filters the input values
+	 * @return the mean of matching values, or {@code 0} if there are no matches
+	 */
+	public double meanNotEqual(long value, BlockIterator filter) {
+		return new EqualityQuery(filter, value, true).mean();
 	}
 
 	/**
@@ -768,6 +1016,24 @@ public class SliceZ {
 	 *         less than or equal to {@code lower} in unsigned order
 	 */
 	public PrimitiveIterator.OfInt between(long lower, long upper) {
+		return between(lower, upper, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Finds the rows whose value lies in the half-open unsigned range
+	 * {@code [lower, upper)} — that is, {@code lower <= v < upper} in unsigned
+	 * order. The lower bound is inclusive and the upper bound is exclusive.
+	 *
+	 * @param lower
+	 *            the inclusive lower bound
+	 * @param upper
+	 *            the exclusive upper bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the matching row ids in ascending order, empty if {@code upper} is
+	 *         less than or equal to {@code lower} in unsigned order
+	 */
+	public PrimitiveIterator.OfInt between(long lower, long upper, BlockIterator filter) {
 		if (Long.compareUnsigned(upper, min) < 0 || Long.compareUnsigned(max, lower) < 0
 				|| Long.compareUnsigned(upper, lower) <= 0) {
 			return IntStream.empty().iterator();
@@ -776,9 +1042,9 @@ public class SliceZ {
 			return IntStream.range(0, rowCount).iterator();
 		}
 		if (lower == 0L) {
-			return lessThan(upper);
+			return upper == 0L ? IntStream.empty().iterator() : lessThanOrEqual(upper - 1, filter);
 		}
-		return new BetweenQuery(lower - 1, upper - 1).iterator();
+		return new BetweenQuery(filter, lower - 1, upper - 1).iterator();
 	}
 
 	/**
@@ -793,13 +1059,30 @@ public class SliceZ {
 	 * @return the number of matching rows
 	 */
 	public int countBetween(long lower, long upper) {
+		return countBetween(lower, upper, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Counts the rows whose value lies in the half-open unsigned range
+	 * {@code [lower, upper)} — that is, {@code lower <= v < upper} in unsigned
+	 * order. The lower bound is inclusive and the upper bound is exclusive.
+	 *
+	 * @param lower
+	 *            the inclusive lower bound
+	 * @param upper
+	 *            the exclusive upper bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the number of matching rows
+	 */
+	public int countBetween(long lower, long upper, BlockIterator filter) {
 		if (lower == 0L) {
-			return countLessThan(upper);
+			return upper == 0L ? 0 : countLessThanOrEqual(upper - 1, filter);
 		}
 		if (Long.compareUnsigned(upper, lower) <= 0) {
 			return 0;
 		}
-		return new BetweenQuery(lower - 1, upper - 1).matchingCount();
+		return new BetweenQuery(filter, lower - 1, upper - 1).matchingCount();
 	}
 
 	/**
@@ -814,13 +1097,30 @@ public class SliceZ {
 	 * @return the sum of matching values
 	 */
 	public double sumBetween(long lower, long upper) {
+		return sumBetween(lower, upper, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Sums all values lying in the half-open unsigned range {@code [lower, upper)}
+	 * — that is, {@code lower <= v < upper} in unsigned order. The lower bound is
+	 * inclusive and the upper bound is exclusive.
+	 *
+	 * @param lower
+	 *            the inclusive lower bound
+	 * @param upper
+	 *            the exclusive upper bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the sum of matching values
+	 */
+	public double sumBetween(long lower, long upper, BlockIterator filter) {
 		if (lower == 0L) {
-			return sumLessThan(upper);
+			return upper == 0L ? 0 : sumLessThanOrEqual(upper - 1, filter);
 		}
 		if (Long.compareUnsigned(upper, lower) <= 0) {
 			return 0;
 		}
-		return new BetweenQuery(lower - 1, upper - 1).sum();
+		return new BetweenQuery(filter, lower - 1, upper - 1).sum();
 	}
 
 	/**
@@ -836,13 +1136,31 @@ public class SliceZ {
 	 * @return the mean of matching values, or {@code 0} if there are no matches
 	 */
 	public double meanBetween(long lower, long upper) {
+		return meanBetween(lower, upper, new IterateAllBlocks(rowCount));
+	}
+
+	/**
+	 * Computes the arithmetic mean of all values lying in the half-open unsigned
+	 * range {@code [lower, upper)} — that is, {@code lower <= v < upper} in
+	 * unsigned order. The lower bound is inclusive and the upper bound is
+	 * exclusive.
+	 *
+	 * @param lower
+	 *            the inclusive lower bound
+	 * @param upper
+	 *            the exclusive upper bound
+	 * @param filter
+	 *            filters the input values
+	 * @return the mean of matching values, or {@code 0} if there are no matches
+	 */
+	public double meanBetween(long lower, long upper, BlockIterator filter) {
 		if (lower == 0L) {
-			return meanLessThan(upper);
+			return upper == 0L ? 0 : meanLessThanOrEqual(upper - 1, filter);
 		}
 		if (Long.compareUnsigned(upper, lower) <= 0) {
 			return 0;
 		}
-		return new BetweenQuery(lower - 1, upper - 1).mean();
+		return new BetweenQuery(filter, lower - 1, upper - 1).mean();
 	}
 
 	/**
@@ -1346,6 +1664,8 @@ public class SliceZ {
 		private int base;
 		private int it;
 		private int outputLimit;
+		// index of the physical block currently sitting at the query's read position
+		private int block;
 
 		private OutputIterator(BaseQuery query, int rowCount, char[] output) {
 			this.query = query;
@@ -1367,20 +1687,41 @@ public class SliceZ {
 		}
 
 		private boolean nextBatch() {
-			prefix = base;
+			BlockIterator blocks = query.blockIterator;
+			if (!blocks.hasNext()) {
+				// no further blocks are of interest: stop the driving loop in hasNext
+				base = rowCount;
+				return false;
+			}
+			// the iterator names the next block to evaluate; skip the stored data of any
+			// blocks it passed over so the query's read position lands on that block
+			int target = blocks.nextBlock();
+			while (block < target) {
+				query.skipBlock();
+				block++;
+			}
+			prefix = block * BLOCK_SIZE;
+			base = prefix;
 			query.evaluateBlock();
+			query.buffer.and(blocks.getBits());
 			int range = Math.min(rowCount - base, output.length);
 			outputLimit = query.extractBits(output, range);
 			base += range;
+			block++;
 			it = 0;
 			return outputLimit > 0;
 		}
 	}
 
 	protected abstract class BaseQuery {
+		private final BlockIterator blockIterator;
 		protected final Bits buffer = new Bits();
 		protected int position = HEADER_SIZE;
 		protected int base = 0;
+
+		protected BaseQuery(BlockIterator blockIterator) {
+			this.blockIterator = blockIterator;
+		}
 
 		public PrimitiveIterator.OfInt iterator() {
 			return new OutputIterator(this, rowCount, new char[buffer.capacity()]);
@@ -1392,11 +1733,20 @@ public class SliceZ {
 
 		int matchingCount() {
 			int matchingCount = 0;
-			while (base < rowCount) {
+			int block = 0;
+			while (blockIterator.hasNext()) {
+				int target = blockIterator.nextBlock();
+				// skip the stored data of any blocks the iterator passed over
+				while (block < target) {
+					skipBlock();
+					block++;
+				}
+				base = block * BLOCK_SIZE;
 				int limit = range();
 				evaluateBlock();
-				base += BLOCK_SIZE;
+				buffer.and(blockIterator.getBits());
 				matchingCount += buffer.count(limit);
+				block++;
 			}
 			return matchingCount;
 		}
@@ -1412,10 +1762,19 @@ public class SliceZ {
 		double aggregate(boolean normalise) {
 			long count = 0;
 			double sum = 0D;
-			while (base < rowCount) {
+			int block = 0;
+			while (blockIterator.hasNext()) {
+				int target = blockIterator.nextBlock();
+				// skip the stored data of any blocks the iterator passed over
+				while (block < target) {
+					skipBlock();
+					block++;
+				}
+				base = block * BLOCK_SIZE;
 				int snapshot = position;
 				int limit = range();
 				evaluateBlock();
+				buffer.and(blockIterator.getBits());
 				int matchingCount = buffer.count(limit);
 				if (matchingCount > 0) {
 					count += matchingCount;
@@ -1453,7 +1812,7 @@ public class SliceZ {
 					// all values are stored relative to blockMin
 					sum += Util.unsignedToDouble(blockMin) * matchingCount;
 				}
-				base += BLOCK_SIZE;
+				block++;
 			}
 			return normalise && count != 0 ? sum / count : sum;
 		}
@@ -1462,6 +1821,17 @@ public class SliceZ {
 
 		protected void skipBlock(long typesHigh, long typesLow) {
 			position = Util.skipBlock(data, position, typesHigh, typesLow);
+		}
+
+		/**
+		 * Advances the read position past the whole block at the current position
+		 * (header and slice payloads) without evaluating it.
+		 */
+		protected void skipBlock() {
+			long typesHigh = data.getLong(position);
+			long typesLow = data.getLong(position + Long.BYTES);
+			position += BLOCK_HEADER_SIZE;
+			skipBlock(typesHigh, typesLow);
 		}
 
 		protected final int range() {
@@ -1486,9 +1856,14 @@ public class SliceZ {
 		private final boolean upper;
 		private final long threshold;
 
-		private SingleBoundQuery(long threshold, boolean upper) {
+		private SingleBoundQuery(BlockIterator blockIterator, long threshold, boolean upper) {
+			super(blockIterator);
 			this.threshold = threshold;
 			this.upper = upper;
+		}
+
+		private SingleBoundQuery(long threshold, boolean upper) {
+			this(new IterateAllBlocks(rowCount), threshold, upper);
 		}
 
 		@Override
@@ -1503,9 +1878,14 @@ public class SliceZ {
 		private final boolean negate;
 		private final long threshold;
 
-		public EqualityQuery(long threshold, boolean negate) {
+		private EqualityQuery(BlockIterator blockIterator, long threshold, boolean negate) {
+			super(blockIterator);
 			this.threshold = threshold;
 			this.negate = negate;
+		}
+
+		private EqualityQuery(long threshold, boolean negate) {
+			this(new IterateAllBlocks(rowCount), threshold, negate);
 		}
 
 		@Override
@@ -1557,8 +1937,13 @@ public class SliceZ {
 		private final Bits temp = new Bits();
 		private final long[] values;
 
-		InQuery(long... values) {
+		InQuery(BlockIterator blockIterator, long... values) {
+			super((blockIterator));
 			this.values = values;
+		}
+
+		InQuery(long... values) {
+			this(new IterateAllBlocks(rowCount), values);
 		}
 
 		@Override
@@ -1602,9 +1987,14 @@ public class SliceZ {
 		private final long lower;
 		private final long upper;
 
-		private BetweenQuery(long lower, long upper) {
+		private BetweenQuery(BlockIterator blockIterator, long lower, long upper) {
+			super(blockIterator);
 			this.lower = lower;
 			this.upper = upper;
+		}
+
+		private BetweenQuery(long lower, long upper) {
+			this(new IterateAllBlocks(rowCount), lower, upper);
 		}
 
 		private void applySlice(Bits bitmap, long threshold, int type, int i, int range) {
@@ -1847,5 +2237,37 @@ public class SliceZ {
 			return position;
 		}
 		return -1;
+	}
+
+	private static final class IterateAllBlocks implements BlockIterator {
+
+		private final int maxBlock;
+		private final Bits bits = Bits.FULL;
+		private int blockIndex = 0;
+
+		public IterateAllBlocks(int maxRows) {
+			// round up: a partial final block still has to be visited
+			this.maxBlock = (maxRows + BLOCK_SIZE - 1) >>> Integer.bitCount(BLOCK_SIZE - 1);
+		}
+
+		@Override
+		public Bits getBits() {
+			return bits;
+		}
+
+		@Override
+		public int nextBlock() {
+			return blockIndex++;
+		}
+
+		@Override
+		public boolean hasNext() {
+			return blockIndex < maxBlock;
+		}
+
+		@Override
+		public boolean isTrivial() {
+			return true;
+		}
 	}
 }

@@ -22,14 +22,14 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Compares the boolean operations (intersection and union) of two
- * {@link CompressedBitmap}s against the same operations on two
+ * {@link BlockedBitmap}s against the same operations on two
  * {@link ImmutableRoaringBitmap}s. The two operands are drawn from the same
  * exponential distribution (the {@code mean} parameter, varied across a range)
  * but with different seeds, so they are distinct bitmaps with a non-trivial
  * overlap over {@code [0, 100M)}.
  *
  * <p>
- * The {@link CompressedBitmap} side consumes its block iterator, materialising
+ * The {@link BlockedBitmap} side consumes its block iterator, materialising
  * each result block into a reused bitset; the Roaring side computes the
  * operation with
  * {@link ImmutableRoaringBitmap#and}/{@link ImmutableRoaringBitmap#or} and
@@ -85,8 +85,8 @@ public class BooleanOperationsBenchmark {
 
 	@State(Scope.Benchmark)
 	public static class CompressedBitmapState extends BaseState {
-		CompressedBitmap x;
-		CompressedBitmap y;
+		BlockedBitmap x;
+		BlockedBitmap y;
 
 		@Setup(Level.Trial)
 		public void setup() {
@@ -94,8 +94,8 @@ public class BooleanOperationsBenchmark {
 			y = build(generateRowIds(1));
 		}
 
-		private static CompressedBitmap build(int[] rids) {
-			var appender = CompressedBitmap.appender();
+		private static BlockedBitmap build(int[] rids) {
+			var appender = BlockedBitmap.appender();
 			for (int rid : rids) {
 				appender.add(rid);
 			}

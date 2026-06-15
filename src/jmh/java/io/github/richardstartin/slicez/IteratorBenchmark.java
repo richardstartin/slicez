@@ -23,7 +23,7 @@ import java.util.SplittableRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Compares full iteration over a {@link CompressedBitmap} against an
+ * Compares full iteration over a {@link BlockedBitmap} against an
  * {@link ImmutableRoaringBitmap} for row id sets drawn from a range of
  * exponential distributions over {@code [0, 100M)}. A smaller {@code mean}
  * concentrates the row ids near the origin (dense low blocks, long absent
@@ -80,11 +80,11 @@ public class IteratorBenchmark {
 
 	@State(Scope.Benchmark)
 	public static class CompressedBitmapState extends BaseState {
-		CompressedBitmap bitmap;
+		BlockedBitmap bitmap;
 
 		@Setup(Level.Trial)
 		public void setup() {
-			var appender = CompressedBitmap.appender();
+			var appender = BlockedBitmap.appender();
 			for (int rid : generateRowIds()) {
 				appender.add(rid);
 			}

@@ -3,18 +3,31 @@ package io.github.richardstartin.slicez;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
+import static io.github.richardstartin.slicez.SliceZ.BLOCK_WORDS;
+
 class Bits {
+
+	public static final Bits FULL = new Bits(0, true);
 
 	final long[] bits;
 	private boolean empty = true;
 	private boolean full;
 
 	public Bits() {
-		this(SliceZ.BLOCK_WORDS);
+		this(BLOCK_WORDS);
 	}
 
 	public Bits(int numWords) {
+		this(numWords, false);
+	}
+
+	public Bits(int numWords, boolean fill) {
 		this.bits = new long[numWords];
+		if (fill) {
+			Arrays.fill(bits, -1L);
+			full = true;
+			empty = false;
+		}
 	}
 
 	boolean isFull() {
@@ -292,6 +305,24 @@ class Bits {
 			Arrays.fill(bits, 0L);
 			full = false;
 			empty = true;
+		}
+	}
+
+	public void and(Bits other) {
+		if (!empty) {
+			if (full && !other.full && !other.empty) {
+				System.arraycopy(other.bits, 0, bits, 0, other.bits.length);
+				full = false;
+			}
+			if (!other.full) {
+				for (int i = 0; i < bits.length; i++) {
+					bits[i] &= other.bits[i];
+				}
+			} else if (other.empty) {
+				Arrays.fill(bits, 0L);
+				empty = true;
+				full = false;
+			}
 		}
 	}
 
