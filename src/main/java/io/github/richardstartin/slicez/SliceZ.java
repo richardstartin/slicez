@@ -1187,6 +1187,44 @@ public class SliceZ {
 	}
 
 	/**
+	 * Computes an unfiltered histogram over the subrange {@code [min, last bound)}
+	 * of the data set. The {@code min} argument is the inclusive lower bound of the
+	 * first bucket; each {@code upperBounds} argument is the <em>exclusive</em>
+	 * upper bound of a bucket and the bounds must be given in ascending unsigned
+	 * order. Bucket {@code i} counts the rows whose value {@code v} satisfies
+	 * {@code lower(i) <= v < upperBounds[i]} (unsigned), where {@code lower(0)} is
+	 * {@code min} and {@code lower(i)} is {@code upperBounds[i - 1]} otherwise.
+	 * Rows below {@code min} or at or above the final bound fall outside every
+	 * bucket and are not counted.
+	 *
+	 * <p>
+	 * The returned array has the same length as {@code upperBounds}, so callers can
+	 * zip the thresholds and counts together by index.
+	 *
+	 * @param min
+	 *            the inclusive lower bound of the first bucket
+	 * @param upperBounds
+	 *            the exclusive upper bounds of each bucket, in ascending unsigned
+	 *            order; every bound must be greater than or equal to {@code min}
+	 * @return the per-bucket row counts, indexed in parallel with
+	 *         {@code upperBounds}
+	 * @throws IllegalArgumentException
+	 *             if any bound is less than {@code min} in unsigned order
+	 */
+	public long[] histogram(long min, long... upperBounds) {
+		for (long bound : upperBounds) {
+			if (Long.compareUnsigned(bound, min) < 0) {
+				throw new IllegalArgumentException("histogram bound " + Long.toUnsignedString(bound) + " is below min "
+						+ Long.toUnsignedString(min));
+			}
+		}
+		if (upperBounds.length == 0) {
+			return new long[0];
+		}
+		return new HistogramQuery(new IterateAllBlocks(rowCount)).histogram(min, upperBounds);
+	}
+
+	/**
 	 * @return the largest indexed value in unsigned order, or {@code 0} if the
 	 *         index is empty
 	 */
@@ -1737,7 +1775,7 @@ public class SliceZ {
 	}
 
 	protected abstract class BaseQuery {
-		private final BlockIterator blockIterator;
+		protected final BlockIterator blockIterator;
 		protected final Bits buffer = new Bits();
 		protected int position = HEADER_SIZE;
 		protected int base = 0;
@@ -1893,6 +1931,86 @@ public class SliceZ {
 		protected void evaluateBlock() {
 			int range = range();
 			position = evaluateSingleBoundQueryBlock(data, position, range, buffer, threshold, upper);
+		}
+	}
+
+	private final class HistogramQuery extends BaseQuery {
+
+		private HistogramQuery(BlockIterator blockIterator) {
+			super(blockIterator);
+		}
+
+		/**
+		 * Computes a histogram over the rows accepted by this query's block iterator,
+		 * restricted to the subrange {@code [min, last bound)}. Each entry of
+		 * {@code upperBounds} is the exclusive upper bound of a bucket and the bounds
+		 * must be supplied in ascending unsigned order. Within every block the
+		 * histogram is evaluated as a sequence of {@code countLessThan} operations: the
+		 * baseline is {@code countLessThan(min)} (subtracted from every count), the
+		 * running count for each successive bound is the number of matching rows below
+		 * it, and the previous bound's count is subtracted so that bucket {@code i}
+		 * accumulates the rows in {@code [lower(i), upperBounds[i])}, where
+		 * {@code lower(0)} is {@code min}. Rows below {@code min} or at or above the
+		 * final bound contribute to no bucket.
+		 *
+		 * @param min
+		 *            the inclusive lower bound of the first bucket
+		 * @param upperBounds
+		 *            the exclusive bucket upper bounds, ascending in unsigned order
+		 * @return per-bucket counts, indexed in parallel with {@code upperBounds}
+		 */
+		long[] histogram(long min, long... upperBounds) {
+			long[] counts = new long[upperBounds.length];
+			int block = 0;
+			while (blockIterator.hasNext()) {
+				int target = blockIterator.nextBlock();
+				// skip the stored data of any blocks the iterator passed over
+				while (block < target) {
+					skipBlock();
+					block++;
+				}
+				base = block * BLOCK_SIZE;
+				int limit = range();
+				int snapshot = position;
+				// rows below min are excluded from every bucket
+				long previous = countLessThanInBlock(min, snapshot, limit);
+				for (int j = 0; j < upperBounds.length; j++) {
+					long countLessThan = countLessThanInBlock(upperBounds[j], snapshot, limit);
+					counts[j] += countLessThan - previous;
+					previous = countLessThan;
+				}
+				// no bound advanced the read position (every threshold, including min, was
+				// zero): skip the block so the next iteration lands on the following block
+				if (position == snapshot) {
+					skipBlock();
+				}
+				block++;
+			}
+			return counts;
+		}
+
+		/**
+		 * Counts the rows in the block beginning at {@code snapshot} whose value is
+		 * unsigned-less-than {@code value}, intersected with the block iterator's
+		 * filter. Re-seeks the read position to {@code snapshot} first so successive
+		 * thresholds can be evaluated against the same block.
+		 */
+		private long countLessThanInBlock(long value, int snapshot, int limit) {
+			if (value == 0L) {
+				// nothing is unsigned-less-than zero
+				return 0L;
+			}
+			position = snapshot;
+			position = evaluateSingleBoundQueryBlock(data, position, limit, buffer, value - 1, true);
+			buffer.and(blockIterator.getBits());
+			return buffer.count(limit);
+		}
+
+		@Override
+		protected void evaluateBlock() {
+			// histogram() evaluates each bound per block directly via countLessThan, so
+			// the single-threshold evaluateBlock contract is never exercised
+			throw new UnsupportedOperationException("histogram evaluates bounds per block");
 		}
 	}
 
