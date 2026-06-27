@@ -1212,6 +1212,37 @@ public class SliceZ {
 	 *             if any bound is less than {@code min} in unsigned order
 	 */
 	public long[] histogram(long min, long... upperBounds) {
+		return histogram(new IterateAllBlocks(rowCount), min, upperBounds);
+	}
+
+	/**
+	 * Computes a filtered histogram over the subrange {@code [min, last bound)} of
+	 * the data set. The {@code min} argument is the inclusive lower bound of the
+	 * first bucket; each {@code upperBounds} argument is the <em>exclusive</em>
+	 * upper bound of a bucket and the bounds must be given in ascending unsigned
+	 * order. Bucket {@code i} counts the rows whose value {@code v} satisfies
+	 * {@code lower(i) <= v < upperBounds[i]} (unsigned), where {@code lower(0)} is
+	 * {@code min} and {@code lower(i)} is {@code upperBounds[i - 1]} otherwise.
+	 * Rows below {@code min} or at or above the final bound fall outside every
+	 * bucket and are not counted.
+	 *
+	 * <p>
+	 * The returned array has the same length as {@code upperBounds}, so callers can
+	 * zip the thresholds and counts together by index.
+	 *
+	 * @param blockIterator
+	 *            the filter to apply prior to producing the histogram
+	 * @param min
+	 *            the inclusive lower bound of the first bucket
+	 * @param upperBounds
+	 *            the exclusive upper bounds of each bucket, in ascending unsigned
+	 *            order; every bound must be greater than or equal to {@code min}
+	 * @return the per-bucket row counts, indexed in parallel with
+	 *         {@code upperBounds}
+	 * @throws IllegalArgumentException
+	 *             if any bound is less than {@code min} in unsigned order
+	 */
+	public long[] histogram(BlockIterator blockIterator, long min, long... upperBounds) {
 		for (long bound : upperBounds) {
 			if (Long.compareUnsigned(bound, min) < 0) {
 				throw new IllegalArgumentException("histogram bound " + Long.toUnsignedString(bound) + " is below min "
@@ -1221,7 +1252,7 @@ public class SliceZ {
 		if (upperBounds.length == 0) {
 			return new long[0];
 		}
-		return new HistogramQuery(new IterateAllBlocks(rowCount)).histogram(min, upperBounds);
+		return new HistogramQuery(blockIterator).histogram(min, upperBounds);
 	}
 
 	/**
