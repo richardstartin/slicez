@@ -1967,8 +1967,15 @@ public class SliceZ {
 
 	private final class HistogramQuery extends BaseQuery {
 
+		private final int tileCount;
+
 		private HistogramQuery(BlockIterator blockIterator) {
+			this(blockIterator, 16);
+		}
+
+		private HistogramQuery(BlockIterator blockIterator, int tileCount) {
 			super(blockIterator);
+			this.tileCount = tileCount;
 		}
 
 		/**
@@ -1991,50 +1998,173 @@ public class SliceZ {
 		 * @return per-bucket counts, indexed in parallel with {@code upperBounds}
 		 */
 		long[] histogram(long min, long... upperBounds) {
+			int nBounds = upperBounds.length + 1;
+			long[] bounds = new long[nBounds];
+			bounds[0] = min;
+			System.arraycopy(upperBounds, 0, bounds, 1, upperBounds.length);
+
+			int b = Math.min(tileCount, nBounds);
+			Bits[] acc = new Bits[b];
+			acc[0] = buffer;
+			for (int i = 1; i < b; i++) {
+				acc[i] = new Bits();
+			}
+			Bits slice = new Bits();
+			long[] blockLt = new long[nBounds];
 			long[] counts = new long[upperBounds.length];
+			long[] anchored = new long[b];
+			int[] start = new int[b];
+
 			int block = 0;
 			while (blockIterator.hasNext()) {
 				int target = blockIterator.nextBlock();
-				// skip the stored data of any blocks the iterator passed over
 				while (block < target) {
 					skipBlock();
 					block++;
 				}
 				base = block * BLOCK_SIZE;
-				int limit = range();
-				int snapshot = position;
-				// rows below min are excluded from every bucket
-				long previous = countLessThanInBlock(min, snapshot, limit);
-				for (int j = 0; j < upperBounds.length; j++) {
-					long countLessThan = countLessThanInBlock(upperBounds[j], snapshot, limit);
-					counts[j] += countLessThan - previous;
-					previous = countLessThan;
+				int range = range();
+
+				long typesHigh = data.getLong(position);
+				long typesLow = data.getLong(position + Long.BYTES);
+				long blockMin = data.getLong(position + 2 * Long.BYTES);
+				long blockMax = data.getLong(position + 3 * Long.BYTES);
+				int sliceStart = position + BLOCK_HEADER_SIZE;
+				Bits filter = blockIterator.getBits();
+
+				for (int lo = 0; lo < nBounds; lo += b) {
+					// re-seek to the first slice: each tile group replays the block's
+					// slices from the start, and position is left past them afterwards
+					position = sliceStart;
+					int n = Math.min(b, nBounds - lo);
+					for (int i = 0; i < n; i++) {
+						start[i] = seedThreshold(bounds[lo + i], acc[i], blockMin, blockMax, typesHigh, typesLow,
+								anchored, i);
+					}
+					long th = typesHigh, tl = typesLow;
+					for (int s = 0; s < Long.SIZE; s++) {
+						int type = ((int) (th & 1) << 1) | (int) (tl & 1);
+						th >>>= 1;
+						tl >>>= 1;
+						// count the accumulators that still need this slice, tracking the
+						// sole consumer so a single-consumer slice can stream directly
+						int needCount = 0;
+						int only = -1;
+						for (int i = 0; i < n; i++) {
+							if (s >= start[i]) {
+								needCount++;
+								only = i;
+							}
+						}
+						if (needCount == 0) {
+							position = Util.skipSlice(type, data, position);
+							continue;
+						}
+
+						switch (type) {
+							case FULL -> {
+								for (int i = 0; i < n; i++) {
+									if (s >= start[i] && (s == 0 || ((anchored[i] >>> s) & 1L) == 1L)) {
+										acc[i].fillFull();
+									}
+								}
+							}
+							case DENSE -> {
+								for (int i = 0; i < n; i++) {
+									if (s >= start[i]) {
+										long bit = (anchored[i] >>> s) & 1L;
+										if (s == 0 && bit == 1L) {
+											acc[i].fillFull();
+										} else if (bit == 1L || s == 0) {
+											acc[i].denseOr(position, data);
+										} else {
+											acc[i].denseAnd(position, data);
+										}
+									}
+								}
+								position += BLOCK_WORDS * Long.BYTES;
+							}
+							default -> {
+								if (needCount == 1) {
+									position = combineSparse(type, position, acc[only], range, s, anchored[only]);
+								} else {
+									position = decodeSparseSlice(type, position, slice, range);
+									for (int i = 0; i < n; i++) {
+										if (s >= start[i])
+											combineSlice(acc[i], slice, s, anchored[i]);
+									}
+								}
+							}
+						}
+					}
+
+					for (int i = 0; i < n; i++) {
+						acc[i].and(filter);
+						blockLt[lo + i] = acc[i].count(range);
+					}
 				}
-				// no bound advanced the read position (every threshold, including min, was
-				// zero): skip the block so the next iteration lands on the following block
-				if (position == snapshot) {
-					skipBlock();
+				for (int j = 0; j < upperBounds.length; j++) {
+					counts[j] += blockLt[j + 1] - blockLt[j];
 				}
 				block++;
 			}
 			return counts;
 		}
 
-		/**
-		 * Counts the rows in the block beginning at {@code snapshot} whose value is
-		 * unsigned-less-than {@code value}, intersected with the block iterator's
-		 * filter. Re-seeks the read position to {@code snapshot} first so successive
-		 * thresholds can be evaluated against the same block.
-		 */
-		private long countLessThanInBlock(long value, int snapshot, int limit) {
-			if (value == 0L) {
-				// nothing is unsigned-less-than zero
-				return 0L;
+		private void combineSlice(Bits acc, Bits slice, int s, long anchored) {
+			long bit = (anchored >>> s) & 1L;
+			if (s == 0 && bit == 1L)
+				acc.fillFull();
+			else if (bit == 1L || s == 0)
+				acc.or(slice);
+			else
+				acc.and(slice);
+		}
+
+		private int decodeSparseSlice(int type, int position, Bits slice, int range) {
+			slice.reset();
+			return type == SPARSE ? slice.sparseOr(position, data) : slice.sparseOrNot(position, data, range);
+		}
+
+		private int seedThreshold(long bound, Bits acc, long blockMin, long blockMax, long typesHigh, long typesLow,
+				long[] anchored, int i) {
+			acc.reset();
+			if (bound == 0L)
+				return Long.SIZE; // nothing < 0
+			long threshold = bound - 1;
+			if (Long.compareUnsigned(threshold, blockMin) < 0)
+				return Long.SIZE; // all rows ≥ bound
+			if (Long.compareUnsigned(threshold, blockMax) > 0) { // all rows < bound
+				acc.fillFull();
+				return Long.SIZE;
 			}
-			position = snapshot;
-			position = evaluateSingleBoundQueryBlock(data, position, limit, buffer, value - 1, true);
-			buffer.and(blockIterator.getBits());
-			return buffer.count(limit);
+			anchored[i] = threshold - blockMin;
+			return Util.firstRelevantSlice(anchored[i], typesHigh, typesLow);
+		}
+
+		/**
+		 * Combines a single sparse (or sparse-inverted) slice straight into
+		 * {@code target}, mirroring the streaming evaluation used when a slice has one
+		 * consumer. At slice {@code s == 0} the accumulator is initialised (filled when
+		 * the value bit is set, otherwise the slice becomes the accumulator); for
+		 * higher slices a set bit unions the slice and an unset bit intersects it. The
+		 * read position is advanced past the payload and returned.
+		 */
+		private int combineSparse(int type, int position, Bits target, int range, int s, long anchored) {
+			long bit = (anchored >>> s) & 1L;
+			if (s == 0) {
+				if (bit == 1L) {
+					target.fillFull();
+					return Util.skipSlice(type, data, position);
+				}
+				return type == SPARSE ? target.sparseOr(position, data) : target.sparseOrNot(position, data, range);
+			}
+			if (bit == 1L) {
+				return type == SPARSE ? target.sparseOr(position, data) : target.sparseOrNot(position, data, range);
+			}
+			return type == SPARSE
+					? target.sparseAnd(position, data, range)
+					: target.sparseAndNot(position, data, range);
 		}
 
 		@Override
