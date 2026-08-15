@@ -78,6 +78,20 @@ class Bits {
 		}
 	}
 
+	/**
+	 * Marks the buffer logically full using only the {@code full} flag, without
+	 * writing the backing words. This is safe wherever consumers honour the flag
+	 * before touching {@code bits}: {@link #count}, {@link #or}, {@link #and},
+	 * {@link #denseOr}, {@link #denseAnd}, {@link #sparseOr}, {@link #sparseAnd}
+	 * and their inverses all treat a full buffer specially and never read its words
+	 * — they are either ignored (count/or) or overwritten (and/denseAnd) before
+	 * use.
+	 */
+	public void fillFull() {
+		full = true;
+		empty = false;
+	}
+
 	public int denseOr(int position, ByteBuffer data) {
 		if (!full) {
 			if (empty) {
