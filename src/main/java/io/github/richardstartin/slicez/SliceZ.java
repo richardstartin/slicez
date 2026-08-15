@@ -2041,8 +2041,55 @@ public class SliceZ {
 						start[i] = seedThreshold(bounds[lo + i], acc[i], blockMin, blockMax, typesHigh, typesLow,
 								anchored, i);
 					}
-					long th = typesHigh, tl = typesLow;
-					for (int s = 0; s < Long.SIZE; s++) {
+					// Shared low-prefix fold: when no present FULL slice forces a later
+					// start (every active bound begins at slice 0) and all active
+					// thresholds agree on a run of low bits, those low slices produce the
+					// same partial result for every bound. Evaluate them once into the
+					// first active accumulator and broadcast, so the per-bound fan-out only
+					// begins at the first differing bit.
+					int firstActive = -1;
+					int activeCount = 0;
+					long andAll = -1L;
+					long orAll = 0L;
+					boolean allZeroStart = true;
+					for (int i = 0; i < n; i++) {
+						if (start[i] == Long.SIZE) {
+							continue;
+						}
+						activeCount++;
+						allZeroStart &= start[i] == 0;
+						if (firstActive < 0) {
+							firstActive = i;
+						}
+						andAll &= anchored[i];
+						orAll |= anchored[i];
+					}
+					int startSlice = 0;
+					if (allZeroStart && activeCount >= 2) {
+						// bits where the active thresholds all agree; the shared low run is
+						// the contiguous agreement from bit 0 up to the first divergence
+						long agree = andAll | ~orAll;
+						int shared = Math.min(Long.numberOfTrailingZeros(~agree), Long.SIZE - 1);
+						if (shared >= 2) {
+							long fth = typesHigh, ftl = typesLow;
+							for (int s = 0; s < shared; s++) {
+								int type = ((int) (fth & 1) << 1) | (int) (ftl & 1);
+								fth >>>= 1;
+								ftl >>>= 1;
+								position = combineOne(type, position, acc[firstActive], range, s,
+										anchored[firstActive]);
+							}
+							for (int i = 0; i < n; i++) {
+								if (i != firstActive && start[i] != Long.SIZE) {
+									acc[i].copyFrom(acc[firstActive]);
+								}
+							}
+							startSlice = shared;
+						}
+					}
+
+					long th = typesHigh >>> startSlice, tl = typesLow >>> startSlice;
+					for (int s = startSlice; s < Long.SIZE; s++) {
 						int type = ((int) (th & 1) << 1) | (int) (tl & 1);
 						th >>>= 1;
 						tl >>>= 1;
@@ -2165,6 +2212,41 @@ public class SliceZ {
 			return type == SPARSE
 					? target.sparseAnd(position, data, range)
 					: target.sparseAndNot(position, data, range);
+		}
+
+		/**
+		 * Combines a single slice of any type into {@code target}, following the same
+		 * per-slice semantics as the main fan-out loop but for one accumulator. Used by
+		 * the shared low-prefix fold to evaluate the common low slices once. Advances
+		 * the read position past the payload and returns it.
+		 */
+		private int combineOne(int type, int position, Bits target, int range, int s, long anchored) {
+			switch (type) {
+				case FULL -> {
+					if (s == 0 || ((anchored >>> s) & 1L) == 1L) {
+						target.fillFull();
+					}
+					return position;
+				}
+				case DENSE -> {
+					long bit = (anchored >>> s) & 1L;
+					if (s == 0) {
+						if (bit == 1L) {
+							target.fillFull();
+						} else {
+							target.denseOr(position, data); // empty target: a copy
+						}
+					} else if (bit == 1L) {
+						target.denseOr(position, data);
+					} else {
+						target.denseAnd(position, data);
+					}
+					return position + BLOCK_WORDS * Long.BYTES;
+				}
+				default -> {
+					return combineSparse(type, position, target, range, s, anchored);
+				}
+			}
 		}
 
 		@Override

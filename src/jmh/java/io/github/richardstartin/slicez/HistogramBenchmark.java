@@ -84,6 +84,11 @@ public class HistogramBenchmark {
 		SliceZ index;
 		long min;
 		long[] bounds;
+		// min and decile bounds rounded down to a power-of-two multiple: after
+		// anchoring, the thresholds agree on their low bits, activating the shared
+		// low-prefix fold. Clamped to stay >= quantizedMin and ascending.
+		long quantizedMin;
+		long[] quantizedBounds;
 
 		@Setup(Level.Trial)
 		public void setup() {
@@ -91,8 +96,13 @@ public class HistogramBenchmark {
 			long[] sorted = unsignedSorted(values);
 			min = sorted[0];
 			bounds = new long[DECILES];
+			quantizedBounds = new long[DECILES];
+			long quantum = 1L << 12;
+			quantizedMin = min - Long.remainderUnsigned(min, quantum);
 			for (int k = 0; k < DECILES; k++) {
 				bounds[k] = sorted[(k + 1) * (sorted.length / DECILES) - 1];
+				long q = bounds[k] - Long.remainderUnsigned(bounds[k], quantum);
+				quantizedBounds[k] = Long.compareUnsigned(q, quantizedMin) < 0 ? quantizedMin : q;
 			}
 			SliceZ.Appender appender = SliceZ.appender();
 			for (long value : values)
@@ -144,6 +154,11 @@ public class HistogramBenchmark {
 	@Benchmark
 	public long[] histogram(SliceZState s) {
 		return s.index.histogram(s.min, s.bounds);
+	}
+
+	@Benchmark
+	public long[] histogramQuantized(SliceZState s) {
+		return s.index.histogram(s.quantizedMin, s.quantizedBounds);
 	}
 
 	@Benchmark

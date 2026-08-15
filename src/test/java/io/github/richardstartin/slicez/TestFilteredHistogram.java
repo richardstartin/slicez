@@ -328,6 +328,39 @@ class TestFilteredHistogram {
 		}
 	}
 
+	// -------------------------------------------------------------------------
+	// Shared low-prefix fold: multi-block, wide-range dense data (no present FULL
+	// slices, so every active bound starts at slice 0) with quantized bounds (all
+	// congruent modulo a power of two, so the anchored thresholds agree on a run of
+	// low bits). This is the exact shape that activates the shared low-prefix fold,
+	// so it must still match the brute-force reference.
+	// -------------------------------------------------------------------------
+
+	@ParameterizedTest
+	@ValueSource(longs = {1, 2, 3, 4, 5})
+	void sharedLowPrefixFold(long seed) {
+		var random = new SplittableRandom(seed);
+		int n = 3 * (int) BLOCK_SIZE + 137;
+		long[] values = new long[n];
+		int[] rows = new int[n];
+		for (int i = 0; i < n; i++) {
+			values[i] = random.nextLong(1L << 40);
+			rows[i] = i;
+		}
+		var idx = buildIdx(values);
+		// bounds congruent modulo 4096 share their low 12 bits after anchoring
+		long quantum = 4096;
+		long[] bounds = new long[10];
+		for (int k = 0; k < bounds.length; k++) {
+			long b = (long) (k + 1) * ((1L << 40) / (bounds.length + 1));
+			bounds[k] = b - Long.remainderUnsigned(b, quantum);
+		}
+		long min = 0;
+		var allowed = rowSet(rows);
+		assertArrayEquals(refHistogram(values, allowed, min, bounds),
+				idx.histogram(bitmap(rows).blockIterator(), min, bounds), () -> "bounds=" + Arrays.toString(bounds));
+	}
+
 	/** Selects a random subset of {@code [0, size)} as the filtered row ids. */
 	private static TreeSet<Integer> randomFilter(SplittableRandom r, int size) {
 		var allowed = new TreeSet<Integer>();

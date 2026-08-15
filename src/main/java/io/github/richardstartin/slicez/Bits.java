@@ -54,6 +54,18 @@ class Bits {
 		full = false;
 	}
 
+	/**
+	 * Overwrites this buffer with a copy of {@code other}, including its empty/full
+	 * flags. Used to broadcast a shared partial result to sibling accumulators. If
+	 * {@code other} is full via the flag alone its (stale) words are copied too,
+	 * but consumers honour the flag and never read them.
+	 */
+	public void copyFrom(Bits other) {
+		System.arraycopy(other.bits, 0, bits, 0, bits.length);
+		empty = other.empty;
+		full = other.full;
+	}
+
 	public int capacity() {
 		return bits.length * Long.SIZE;
 	}
