@@ -1533,7 +1533,7 @@ public class SliceZ {
 					}
 					int range = Math.min(rowCount - block.base, BLOCK_SIZE);
 					if (threshold == 0L) {
-						buffer.fill(range);
+						buffer.fill();
 					} else {
 						evaluateSingleBoundQueryBlock(data, block.offset, range, buffer, threshold - 1, false);
 					}
@@ -1610,50 +1610,97 @@ public class SliceZ {
 					case SPARSE -> {
 						int count = data.getChar(position);
 						position += Character.BYTES;
-						for (int i = 0; i < count; i++) {
-							int row = data.getChar(position);
-							position += Character.BYTES;
-							if (filter.contains(row)) {
-								// fixme - this is probably going to be a bottleneck
-								values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
+						int end = position + count * Character.BYTES;
+						if (filter.isFull()) {
+							// every row passes, so rowIndex is null and no filter check is needed
+							for (int i = 0; i < count; i++) {
+								int row = data.getChar(position);
+								position += Character.BYTES;
+								if (row >= range) {
+									// positions are ascending; the rest are padding beyond range
+									break;
+								}
+								values[row] |= bit;
+							}
+						} else if (!filter.isEmpty()) {
+							for (int i = 0; i < count; i++) {
+								int row = data.getChar(position);
+								position += Character.BYTES;
+								if (row >= range) {
+									break;
+								}
+								if (filter.contains(row)) {
+									values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
+								}
 							}
 						}
+						// advance as if the whole payload was consumed
+						position = end;
 					}
 					case SPARSE_INVERTED -> {
 						int count = data.getChar(position);
 						position += Character.BYTES;
-						int prev = 0;
-						for (int i = 0; i < count; i++) {
-							int next = data.getChar(position);
-							position += Character.BYTES;
-							for (int row = prev; row < next; row++) {
+						int end = position + count * Character.BYTES;
+						// stop once the reconstructed rows reach range: the remaining gaps lie
+						// entirely in the padding beyond it
+						if (filter.isFull()) {
+							// every row passes, so rowIndex is null and no filter check is needed
+							int prev = 0;
+							for (int i = 0; i < count && prev < range; i++) {
+								int next = data.getChar(position);
+								position += Character.BYTES;
+								int hi = Math.min(next, range);
+								for (int row = prev; row < hi; row++) {
+									values[row] |= bit;
+								}
+								prev = next + 1;
+							}
+							for (int row = prev; row < range; row++) {
+								values[row] |= bit;
+							}
+						} else if (!filter.isEmpty()) {
+							int prev = 0;
+							for (int i = 0; i < count && prev < range; i++) {
+								int next = data.getChar(position);
+								position += Character.BYTES;
+								int hi = Math.min(next, range);
+								for (int row = prev; row < hi; row++) {
+									if (filter.contains(row)) {
+										values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
+									}
+								}
+								prev = next + 1;
+							}
+							for (int row = prev; row < range; row++) {
 								if (filter.contains(row)) {
-									// fixme - this is probably going to be a bottleneck
 									values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
 								}
 							}
-							prev = next + 1;
 						}
-						for (int row = prev; row < range; row++) {
-							if (filter.contains(row)) {
-								// fixme - this is probably going to be a bottleneck
-								values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
-							}
-						}
+						// advance as if the whole payload was consumed
+						position = end;
 					}
 					case DENSE -> {
-						for (int i = 0; i < BLOCK_WORDS; i++) {
-							long filterWord = filter.bits[i];
-							long storedWord = data.getLong(position);
-							position += Long.BYTES;
-							long rows = filterWord & storedWord;
-							while (rows != 0) {
-								int row = i * Long.SIZE + Long.numberOfTrailingZeros(rows);
-								// fixme probable bottleneck
-								values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
-								rows &= (rows - 1);
+						if (!filter.isEmpty()) {
+							boolean filterFull = filter.isFull();
+							int wordLimit = (range + 63) >>> 6;
+							int lastWord = range >>> 6;
+							for (int i = 0; i < wordLimit; i++) {
+								long filterWord = filterFull ? -1L : filter.bits[i];
+								long storedWord = data.getLong(position + i * Long.BYTES);
+								long rows = filterWord & storedWord;
+								if (i == lastWord) {
+									rows &= (1L << range) - 1;
+								}
+								while (rows != 0) {
+									int row = i * Long.SIZE + Long.numberOfTrailingZeros(rows);
+									// fixme probable bottleneck
+									values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
+									rows &= (rows - 1);
+								}
 							}
 						}
+						position += BLOCK_WORDS * Long.BYTES;
 					}
 				}
 			}
@@ -2112,7 +2159,7 @@ public class SliceZ {
 							case FULL -> {
 								for (int i = 0; i < n; i++) {
 									if (s >= start[i] && (s == 0 || ((anchored[i] >>> s) & 1L) == 1L)) {
-										acc[i].fillFull();
+										acc[i].fill();
 									}
 								}
 							}
@@ -2121,7 +2168,7 @@ public class SliceZ {
 									if (s >= start[i]) {
 										long bit = (anchored[i] >>> s) & 1L;
 										if (s == 0 && bit == 1L) {
-											acc[i].fillFull();
+											acc[i].fill();
 										} else if (bit == 1L || s == 0) {
 											acc[i].denseOr(position, data);
 										} else {
@@ -2161,7 +2208,7 @@ public class SliceZ {
 		private void combineSlice(Bits acc, Bits slice, int s, long anchored) {
 			long bit = (anchored >>> s) & 1L;
 			if (s == 0 && bit == 1L)
-				acc.fillFull();
+				acc.fill();
 			else if (bit == 1L || s == 0)
 				acc.or(slice);
 			else
@@ -2182,7 +2229,7 @@ public class SliceZ {
 			if (Long.compareUnsigned(threshold, blockMin) < 0)
 				return Long.SIZE; // all rows ≥ bound
 			if (Long.compareUnsigned(threshold, blockMax) > 0) { // all rows < bound
-				acc.fillFull();
+				acc.fill();
 				return Long.SIZE;
 			}
 			anchored[i] = threshold - blockMin;
@@ -2201,7 +2248,7 @@ public class SliceZ {
 			long bit = (anchored >>> s) & 1L;
 			if (s == 0) {
 				if (bit == 1L) {
-					target.fillFull();
+					target.fill();
 					return Util.skipSlice(type, data, position);
 				}
 				return type == SPARSE ? target.sparseOr(position, data) : target.sparseOrNot(position, data, range);
@@ -2224,7 +2271,7 @@ public class SliceZ {
 			switch (type) {
 				case FULL -> {
 					if (s == 0 || ((anchored >>> s) & 1L) == 1L) {
-						target.fillFull();
+						target.fill();
 					}
 					return position;
 				}
@@ -2232,7 +2279,7 @@ public class SliceZ {
 					long bit = (anchored >>> s) & 1L;
 					if (s == 0) {
 						if (bit == 1L) {
-							target.fillFull();
+							target.fill();
 						} else {
 							target.denseOr(position, data); // empty target: a copy
 						}
@@ -2289,9 +2336,9 @@ public class SliceZ {
 			if (Long.compareUnsigned(threshold, blockMin) < 0 || Long.compareUnsigned(threshold, blockMax) > 0) {
 				skipBlock(typesHigh, typesLow);
 				if (negate) {
-					buffer.fill(range);
+					buffer.fill();
 				} else {
-					buffer.clear(range);
+					buffer.clear();
 				}
 				return;
 			}
@@ -2308,9 +2355,9 @@ public class SliceZ {
 				// this could be calculated from the type masks if sparse slices were removed
 				skipBlock(typesHigh, typesLow);
 				if (negate) {
-					buffer.fill(range);
+					buffer.fill();
 				} else {
-					buffer.clear(range);
+					buffer.clear();
 				}
 			}
 		}
@@ -2347,7 +2394,7 @@ public class SliceZ {
 				position = blockStart;
 				if (Long.compareUnsigned(value, blockMin) < 0) {
 					skipBlock(typesHigh, typesLow);
-					temp.clear(range);
+					temp.clear();
 				} else {
 					temp.reset();
 					long anchoredValue = value - blockMin;
@@ -2390,7 +2437,7 @@ public class SliceZ {
 
 		private void firstSlice(Bits bitmap, long threshold, int type, int range) {
 			if ((threshold & 1) == 1) {
-				bitmap.fill(range);
+				bitmap.fill();
 				switch (type) {
 					case SPARSE_INVERTED, SPARSE -> {
 						int cnt = data.getChar(position);
@@ -2405,7 +2452,7 @@ public class SliceZ {
 					case SPARSE_INVERTED -> position = bitmap.sparseOrNot(position, data, range);
 					case SPARSE -> position = bitmap.sparseOr(position, data);
 					case DENSE -> position = bitmap.denseOr(position, data);
-					case FULL -> bitmap.fill(range);
+					case FULL -> bitmap.fill();
 				}
 			}
 		}
@@ -2417,7 +2464,7 @@ public class SliceZ {
 					case SPARSE_INVERTED -> position = bitmap.sparseOrNot(position, data, range);
 					case SPARSE -> position = bitmap.sparseOr(position, data);
 					case DENSE -> position = bitmap.denseOr(position, data);
-					case FULL -> bitmap.fill(range);
+					case FULL -> bitmap.fill();
 				}
 			} else {
 				switch (type) {
@@ -2445,7 +2492,7 @@ public class SliceZ {
 			boolean trivialLowerBound = Long.compareUnsigned(lower, blockMin) < 0;
 			if (trivialUpperBound) {
 				skipBlock(typesHigh, typesLow);
-				buffer.clear(range);
+				buffer.clear();
 				return;
 			}
 			long anchoredLower = lower - blockMin;
@@ -2454,7 +2501,7 @@ public class SliceZ {
 					? Long.SIZE
 					: Util.firstRelevantSlice(anchoredLower, typesHigh, typesLow);
 			if (trivialLowerBound) {
-				buffer.clear(range);
+				buffer.clear();
 			} else {
 				buffer.reset();
 			}
@@ -2499,18 +2546,18 @@ public class SliceZ {
 		if (Long.compareUnsigned(threshold, blockMin) < 0) {
 			position = Util.skipBlock(data, position, typesHigh, typesLow);
 			if (upper) {
-				buffer.clear(range);
+				buffer.clear();
 			} else {
-				buffer.fill(range);
+				buffer.fill();
 			}
 			return position;
 		}
 		if (Long.compareUnsigned(threshold, blockMax) > 0) {
 			position = Util.skipBlock(data, position, typesHigh, typesLow);
 			if (upper) {
-				buffer.fill(range);
+				buffer.fill();
 			} else {
-				buffer.clear(range);
+				buffer.clear();
 			}
 			return position;
 		}
@@ -2518,9 +2565,9 @@ public class SliceZ {
 		int firstRelevantSlice = Util.firstRelevantSlice(anchoredThreshold, typesHigh, typesLow);
 		if (firstRelevantSlice > 0) {
 			if ((typesHigh & typesLow & (1L << firstRelevantSlice)) != 0) {
-				buffer.fill(range);
+				buffer.fill();
 			} else {
-				buffer.clear(range);
+				buffer.clear();
 			}
 		}
 		int type = ((int) (typesHigh & 1) << 1) | (int) (typesLow & 1);
@@ -2529,7 +2576,7 @@ public class SliceZ {
 		// first slice is special - if the threshold includes it just fill the buffer
 		if (firstRelevantSlice == 0) {
 			if ((anchoredThreshold & 1) == 1) {
-				buffer.fill(range);
+				buffer.fill();
 				position = Util.skipSlice(type, data, position);
 			} else {
 				buffer.reset();
@@ -2537,7 +2584,7 @@ public class SliceZ {
 					case SPARSE_INVERTED -> position = buffer.sparseOrNot(position, data, range);
 					case SPARSE -> position = buffer.sparseOr(position, data);
 					case DENSE -> position = buffer.denseOr(position, data);
-					case FULL -> buffer.fill(range);
+					case FULL -> buffer.fill();
 				}
 			}
 		} else {
@@ -2559,7 +2606,7 @@ public class SliceZ {
 					case SPARSE_INVERTED -> position = buffer.sparseOrNot(position, data, range);
 					case SPARSE -> position = buffer.sparseOr(position, data);
 					case DENSE -> position = buffer.denseOr(position, data);
-					case FULL -> buffer.fill(range);
+					case FULL -> buffer.fill();
 				}
 			} else {
 				switch (type) {
@@ -2588,7 +2635,7 @@ public class SliceZ {
 		long fullSlices = typesHigh & typesLow;
 		if ((fullSlices & anchoredThreshold) == 0) {
 			long storedSlices = ~(typesHigh & typesLow);
-			buffer.fill(range);
+			buffer.fill();
 			while (storedSlices != 0) {
 				int slice = Long.numberOfTrailingZeros(storedSlices);
 				storedSlices &= (storedSlices - 1);
@@ -2601,7 +2648,7 @@ public class SliceZ {
 						case DENSE -> position = buffer.denseAndNot(position, data);
 						case FULL -> {
 							assert false : "entire block should have been skipped for full block";
-							buffer.clear(range);
+							buffer.clear();
 						}
 					}
 				} else {

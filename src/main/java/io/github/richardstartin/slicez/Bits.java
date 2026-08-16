@@ -54,12 +54,6 @@ class Bits {
 		full = false;
 	}
 
-	/**
-	 * Overwrites this buffer with a copy of {@code other}, including its empty/full
-	 * flags. Used to broadcast a shared partial result to sibling accumulators. If
-	 * {@code other} is full via the flag alone its (stale) words are copied too,
-	 * but consumers honour the flag and never read them.
-	 */
 	public void copyFrom(Bits other) {
 		System.arraycopy(other.bits, 0, bits, 0, bits.length);
 		empty = other.empty;
@@ -71,35 +65,21 @@ class Bits {
 	}
 
 	public boolean contains(int index) {
+		if (full) {
+			return true;
+		}
+		if (empty) {
+			return false;
+		}
 		return (bits[index >>> 6] & (1L << index)) != 0;
 	}
 
-	public void clear(int limit) {
-		Util.clearBitmap(bits, 0, limit);
+	public void clear() {
 		full = false;
-		if (limit >= capacity()) {
-			empty = true;
-		}
+		empty = true;
 	}
 
-	public void fill(int limit) {
-		Util.fillBitmap(bits, 0, limit);
-		empty = false;
-		if (limit >= capacity()) {
-			full = true;
-		}
-	}
-
-	/**
-	 * Marks the buffer logically full using only the {@code full} flag, without
-	 * writing the backing words. This is safe wherever consumers honour the flag
-	 * before touching {@code bits}: {@link #count}, {@link #or}, {@link #and},
-	 * {@link #denseOr}, {@link #denseAnd}, {@link #sparseOr}, {@link #sparseAnd}
-	 * and their inverses all treat a full buffer specially and never read its words
-	 * — they are either ignored (count/or) or overwritten (and/denseAnd) before
-	 * use.
-	 */
-	public void fillFull() {
+	public void fill() {
 		full = true;
 		empty = false;
 	}
@@ -125,7 +105,7 @@ class Bits {
 			}
 		}
 		empty = false;
-		return position + SliceZ.BLOCK_WORDS * Long.BYTES;
+		return position + BLOCK_WORDS * Long.BYTES;
 	}
 
 	public int denseAnd(int position, ByteBuffer data) {
@@ -178,14 +158,22 @@ class Bits {
 	public int denseAndNotCardinality(int position, ByteBuffer data, int limit) {
 		int cardinality = 0;
 		if (!empty) {
-			int wordLimit = (limit + 63) >>> 6;
+			int fullWords = limit >>> 6;
+			long tailMask = (1L << limit) - 1;
 			if (full) {
-				for (int i = 0; i < wordLimit; i++) {
+				for (int i = 0; i < fullWords; i++) {
 					cardinality += Long.bitCount(~data.getLong(position + i * Long.BYTES));
 				}
+				if (tailMask != 0L) {
+					cardinality += Long.bitCount(~data.getLong(position + fullWords * Long.BYTES) & tailMask);
+				}
 			} else {
-				for (int i = 0; i < wordLimit; i++) {
+				for (int i = 0; i < fullWords; i++) {
 					cardinality += Long.bitCount(bits[i] & ~data.getLong(position + i * Long.BYTES));
+				}
+				if (tailMask != 0L) {
+					cardinality += Long
+							.bitCount(bits[fullWords] & ~data.getLong(position + fullWords * Long.BYTES) & tailMask);
 				}
 			}
 		}
@@ -256,7 +244,7 @@ class Bits {
 	public int sparseOrNot(int position, ByteBuffer data, int range) {
 		if (!full) {
 			int advancedTo = empty
-					? Util.coveredSparseOrNot(bits, data, position, range)
+					? Util.coveredSparseOrNot(bits, data, position)
 					: Util.sparseOrNot(bits, data, position, range);
 			full = advancedTo < 0;
 			empty = false;
@@ -293,7 +281,9 @@ class Bits {
 
 	public int sparseAndNot(int position, ByteBuffer data, int range) {
 		if (!empty) {
-			int advancedTo = Util.sparseAndNot(bits, data, position, range);
+			int advancedTo = full
+					? Util.coveredSparseAndNot(bits, data, position)
+					: Util.sparseAndNot(bits, data, position, range);
 			empty = advancedTo <= 0;
 			full = false;
 			return Math.abs(advancedTo);
@@ -306,31 +296,34 @@ class Bits {
 		if (empty) {
 			empty = false;
 			full = true;
-			Util.fillBitmap(bits, 0, range);
 		} else if (full) {
 			full = false;
 			empty = true;
-			Util.clearBitmap(bits, 0, range);
 		} else {
 			Util.flipBitmap(bits, 0, range);
 		}
 	}
 
 	public void flipAnd(Bits other) {
-		if (!full && !other.empty) {
-			if (empty) {
-				System.arraycopy(other.bits, 0, bits, 0, bits.length);
-				empty = false;
-				full = other.full;
-			} else {
-				for (int i = 0; i < bits.length; i++) {
-					bits[i] = ~bits[i] & other.bits[i];
-				}
-			}
-		} else {
-			Arrays.fill(bits, 0L);
+		if (full || other.empty) {
 			full = false;
 			empty = true;
+		} else if (other.full) {
+			if (empty) {
+				full = true;
+				empty = false;
+			} else {
+				for (int i = 0; i < bits.length; i++) {
+					bits[i] = ~bits[i];
+				}
+			}
+		} else if (empty) {
+			System.arraycopy(other.bits, 0, bits, 0, bits.length);
+			empty = false;
+		} else {
+			for (int i = 0; i < bits.length; i++) {
+				bits[i] = ~bits[i] & other.bits[i];
+			}
 		}
 	}
 
