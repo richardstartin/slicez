@@ -74,6 +74,26 @@ class TestBottomK {
 		assertArrayEquals(referenceTopK(data, k), sortedValues(data, rows), "values mismatch for k=" + k);
 	}
 
+	@Test
+	void topBottomKSkewedMultiBlock() {
+		var random = new SplittableRandom(31337L);
+		int b = (int) BLOCK_SIZE;
+		for (int trial = 0; trial < 8; trial++) {
+			int n = b + 1 + random.nextInt(2 * b); // 2-3 blocks, last partial
+			long[] data = new long[n];
+			long dominant = random.nextLong(1_000_000);
+			for (int i = 0; i < n; i++) {
+				// heavily skewed: most bit-slices are near-constant, producing SPARSE and
+				// SPARSE_INVERTED slices (the loops extractValuesToHeap reconstructs)
+				data[i] = random.nextInt(20) == 0 ? random.nextLong(1_000_000) : dominant;
+			}
+			for (int k : new int[]{1, 10, 100, 1000}) {
+				assertTopK(data, k);
+				assertBottomK(data, k);
+			}
+		}
+	}
+
 	// -------------------------------------------------------------------------
 	// Contract / edge cases
 	// -------------------------------------------------------------------------

@@ -308,8 +308,8 @@ public class SliceZ {
 	}
 
 	SliceZ(ByteBuffer data) {
-		this.data = data;
-		int cookie = data.getInt(0);
+		this.data = data.order(ByteOrder.LITTLE_ENDIAN);
+		int cookie = this.data.getInt(0);
 		if (cookie != COOKIE) {
 			throw new IllegalArgumentException(
 					"cookie should be " + Integer.toHexString(COOKIE) + " but found " + Integer.toHexString(cookie));
@@ -862,7 +862,7 @@ public class SliceZ {
 		if (values.length == 0) {
 			return 0D;
 		}
-		if (values.length == 1) {
+		if (values.length == 1 && filter.isTrivial()) {
 			return sumEqual(values[0]);
 		}
 		return new InQuery(filter, values).sum();
@@ -898,7 +898,7 @@ public class SliceZ {
 		if (values.length == 0) {
 			return 0D;
 		}
-		if (values.length == 1) {
+		if (values.length == 1 && filter.isTrivial()) {
 			return meanEqual(values[0]);
 		}
 		return new InQuery(filter, values).mean();
@@ -960,7 +960,7 @@ public class SliceZ {
 	 * @return the sum of matching rows
 	 */
 	public double sumEqual(long value) {
-		return countEqual(value) * (double) value;
+		return countEqual(value) * Util.unsignedToDouble(value);
 	}
 
 	/**
@@ -970,10 +970,11 @@ public class SliceZ {
 	 *
 	 * @param value
 	 *            the value to match
-	 * @return {@code (double) value} if any row matches, {@code 0} otherwise
+	 * @return the unsigned value as a {@code double} if any row matches, {@code 0}
+	 *         otherwise
 	 */
 	public double meanEqual(long value) {
-		return countEqual(value) > 0 ? value : 0D;
+		return countEqual(value) > 0 ? Util.unsignedToDouble(value) : 0D;
 	}
 
 	/**
@@ -1061,7 +1062,7 @@ public class SliceZ {
 				|| Long.compareUnsigned(upper, lower) <= 0) {
 			return IntStream.empty().iterator();
 		}
-		if (Long.compareUnsigned(lower, min) < 0 && Long.compareUnsigned(max, upper) < 0) {
+		if (filter.isTrivial() && Long.compareUnsigned(lower, min) < 0 && Long.compareUnsigned(max, upper) < 0) {
 			return IntStream.range(0, rowCount).iterator();
 		}
 		if (lower == 0L) {
@@ -2001,10 +2002,6 @@ public class SliceZ {
 			this.upper = upper;
 		}
 
-		private SingleBoundQuery(long threshold, boolean upper) {
-			this(new IterateAllBlocks(rowCount), threshold, upper);
-		}
-
 		@Override
 		protected void evaluateBlock() {
 			int range = range();
@@ -2315,10 +2312,6 @@ public class SliceZ {
 			this.negate = negate;
 		}
 
-		private EqualityQuery(long threshold, boolean negate) {
-			this(new IterateAllBlocks(rowCount), threshold, negate);
-		}
-
 		@Override
 		protected void evaluateBlock() {
 			// for each i
@@ -2373,10 +2366,6 @@ public class SliceZ {
 			this.values = values;
 		}
 
-		InQuery(long... values) {
-			this(new IterateAllBlocks(rowCount), values);
-		}
-
 		@Override
 		protected void evaluateBlock() {
 			int range = range();
@@ -2422,10 +2411,6 @@ public class SliceZ {
 			super(blockIterator);
 			this.lower = lower;
 			this.upper = upper;
-		}
-
-		private BetweenQuery(long lower, long upper) {
-			this(new IterateAllBlocks(rowCount), lower, upper);
 		}
 
 		private void applySlice(Bits bitmap, long threshold, int type, int i, int range) {

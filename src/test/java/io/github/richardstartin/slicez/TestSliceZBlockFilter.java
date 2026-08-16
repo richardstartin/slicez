@@ -4,9 +4,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.PrimitiveIterator;
 import java.util.Set;
+import java.util.SplittableRandom;
 import java.util.TreeSet;
 import java.util.function.LongPredicate;
 
@@ -151,6 +154,293 @@ class TestSliceZBlockFilter {
 		assertQuery(values, allowed, v -> Long.compareUnsigned(v, 3) >= 0 && Long.compareUnsigned(v, 7) < 0,
 				idx.between(3, 7, filter.blockIterator()), idx.countBetween(3, 7, filter.blockIterator()),
 				idx.sumBetween(3, 7, filter.blockIterator()), idx.meanBetween(3, 7, filter.blockIterator()));
+	}
+
+	@Test
+	void betweenCoveringFullRangeRespectsFilter() {
+		// min = 10, max = 50; the range [5, 60) covers every value, which triggers the
+		// "all rows" fast path in between(lower, upper, filter). That path must still
+		// honour the filter (as countBetween/sumBetween do): only rows 1 and 3 qualify.
+		long[] values = {10, 20, 30, 40, 50};
+		var idx = SliceZ.build(values);
+		var filter = bitmap(1, 3);
+		var allowed = rowSet(1, 3);
+		assertQuery(values, allowed, v -> Long.compareUnsigned(v, 5) >= 0 && Long.compareUnsigned(v, 60) < 0,
+				idx.between(5, 60, filter.blockIterator()), idx.countBetween(5, 60, filter.blockIterator()),
+				idx.sumBetween(5, 60, filter.blockIterator()), idx.meanBetween(5, 60, filter.blockIterator()));
+	}
+
+	@Test
+	void sumInSingleValueRespectsFilter() {
+		// value 5 is in rows 0..3; the filter keeps rows 0 and 2, so the filtered sum
+		// is 10. countIn's single-value shortcut is filtered (returns 2), but sumIn's
+		// shortcut delegates to the *unfiltered* sumEqual and returns 20 (5 * 4).
+		long[] values = {5, 5, 5, 5};
+		var idx = SliceZ.build(values);
+		var filter = bitmap(0, 2);
+		assertEquals(2, idx.countIn(filter.blockIterator(), 5L), "count (control)");
+		assertEquals(10.0, idx.sumIn(filter.blockIterator(), 5L), 1e-9, "sum must honour the filter");
+	}
+
+	@Test
+	void sumEqualHandlesLargeUnsignedValue() {
+		// Long.MIN_VALUE is 2^63 in unsigned terms (~9.22e18). Two rows hold it, so the
+		// unsigned sum is 2^64. sumEqual uses (double) value, which reads the sign bit
+		// as negative and returns -2^64 instead.
+		long v = Long.MIN_VALUE;
+		var idx = SliceZ.build(v, v);
+		assertEquals(2, idx.countEqual(v), "count (control)");
+		assertEquals(Math.scalb(1.0, 64), idx.sumEqual(v), 1.0, "sumEqual must treat the value as unsigned");
+	}
+
+	@Test
+	void filteredQueriesCrossCheck() {
+		var random = new SplittableRandom(20260817L);
+		for (int trial = 0; trial < 500; trial++) {
+			int n = 1 + random.nextInt(150);
+			long base = random.nextInt(100000);
+			int spread = 1 + random.nextInt(40);
+			long[] values = new long[n];
+			// half the trials use a heavily skewed distribution (one dominant value) so
+			// most bit-slices are near-constant, producing SPARSE / SPARSE_INVERTED slices
+			boolean skewed = random.nextBoolean();
+			long dominant = base + random.nextInt(spread);
+			for (int i = 0; i < n; i++) {
+				values[i] = (skewed && random.nextInt(20) != 0) ? dominant : base + random.nextInt(spread);
+			}
+			var idx = SliceZ.build(values);
+
+			var allowed = new TreeSet<Integer>();
+			switch (random.nextInt(4)) {
+				case 0 -> { // trivial: every row
+					for (int i = 0; i < n; i++) {
+						allowed.add(i);
+					}
+				}
+				case 1 -> { // random subset
+					for (int i = 0; i < n; i++) {
+						if (random.nextBoolean()) {
+							allowed.add(i);
+						}
+					}
+				}
+				case 2 -> allowed.add(random.nextInt(n)); // singleton
+				default -> {
+					/* empty */ }
+			}
+			var filter = bitmap(allowed.stream().mapToInt(Integer::intValue).toArray());
+
+			// thresholds biased to the edges: below min, inside, above max
+			long t = base - 2 + random.nextInt(spread + 4);
+			long lo = base - 2 + random.nextInt(spread + 4);
+			long hi = base - 2 + random.nextInt(spread + 4);
+			long eq = base + random.nextInt(spread);
+
+			assertQuery(values, allowed, v -> Long.compareUnsigned(v, t) > 0,
+					idx.greaterThan(t, filter.blockIterator()), idx.countGreaterThan(t, filter.blockIterator()),
+					idx.sumGreaterThan(t, filter.blockIterator()), idx.meanGreaterThan(t, filter.blockIterator()));
+			assertQuery(values, allowed, v -> Long.compareUnsigned(v, t) <= 0,
+					idx.lessThanOrEqual(t, filter.blockIterator()), idx.countLessThanOrEqual(t, filter.blockIterator()),
+					idx.sumLessThanOrEqual(t, filter.blockIterator()),
+					idx.meanLessThanOrEqual(t, filter.blockIterator()));
+			assertQuery(values, allowed, v -> v != eq, idx.notEqual(eq, filter.blockIterator()),
+					idx.countNotEqual(eq, filter.blockIterator()), idx.sumNotEqual(eq, filter.blockIterator()),
+					idx.meanNotEqual(eq, filter.blockIterator()));
+			assertQuery(values, allowed, v -> Long.compareUnsigned(v, lo) >= 0 && Long.compareUnsigned(v, hi) < 0,
+					idx.between(lo, hi, filter.blockIterator()), idx.countBetween(lo, hi, filter.blockIterator()),
+					idx.sumBetween(lo, hi, filter.blockIterator()), idx.meanBetween(lo, hi, filter.blockIterator()));
+
+			// equal (no filtered sum/mean overloads, so check ids and count only)
+			int[] eqIds = rowsWhere(values, v -> v == eq, allowed);
+			assertArrayEquals(eqIds, collect(idx.equal(eq, filter.blockIterator())), "equal ids");
+			assertEquals(eqIds.length, idx.countEqual(eq, filter.blockIterator()), "equal count");
+
+			// unfiltered greaterThanOrEqual / lessThan (their value==0 and value-1
+			// delegations are the shortcut style that has had bugs); force 0 sometimes
+			var allRows = new TreeSet<Integer>();
+			for (int i = 0; i < n; i++) {
+				allRows.add(i);
+			}
+			long gte = random.nextInt(3) == 0 ? 0 : t;
+			assertQuery(values, allRows, v -> Long.compareUnsigned(v, gte) >= 0, idx.greaterThanOrEqual(gte),
+					idx.countGreaterThanOrEqual(gte), idx.sumGreaterThanOrEqual(gte), idx.meanGreaterThanOrEqual(gte));
+
+			// unfiltered fast-path families (IterateAllBlocks is trivial, so these hit the
+			// isTrivial() all-rows / rowCount shortcuts at the edge thresholds)
+			assertQuery(values, allRows, v -> Long.compareUnsigned(v, t) <= 0, idx.lessThanOrEqual(t),
+					idx.countLessThanOrEqual(t), idx.sumLessThanOrEqual(t), idx.meanLessThanOrEqual(t));
+			assertQuery(values, allRows, v -> Long.compareUnsigned(v, t) > 0, idx.greaterThan(t),
+					idx.countGreaterThan(t), idx.sumGreaterThan(t), idx.meanGreaterThan(t));
+			assertQuery(values, allRows, v -> Long.compareUnsigned(v, lo) >= 0 && Long.compareUnsigned(v, hi) < 0,
+					idx.between(lo, hi), idx.countBetween(lo, hi), idx.sumBetween(lo, hi), idx.meanBetween(lo, hi));
+			long ltv = random.nextInt(3) == 0 ? 0 : t;
+			assertQuery(values, allRows, v -> Long.compareUnsigned(v, ltv) < 0, idx.lessThan(ltv),
+					idx.countLessThan(ltv), idx.sumLessThan(ltv), idx.meanLessThan(ltv));
+
+			// in with a mix of present and absent values (exercises InQuery)
+			int k = 2 + random.nextInt(3);
+			long[] inVals = new long[k];
+			var inSet = new TreeSet<Long>();
+			for (int j = 0; j < k; j++) {
+				inVals[j] = base - 1 + random.nextInt(spread + 2);
+				inSet.add(inVals[j]);
+			}
+			assertQuery(values, allowed, inSet::contains, idx.in(filter.blockIterator(), inVals),
+					idx.countIn(filter.blockIterator(), inVals), idx.sumIn(filter.blockIterator(), inVals),
+					idx.meanIn(filter.blockIterator(), inVals));
+		}
+	}
+
+	@Test
+	void filteredQueriesCrossCheckMultiBlock() {
+		var random = new SplittableRandom(4242L);
+		for (int trial = 0; trial < 6; trial++) {
+			int n = BLOCK + 1 + random.nextInt(2 * BLOCK); // spans 2-3 blocks, last partial
+			long[] values = new long[n];
+			for (int i = 0; i < n; i++) {
+				values[i] = i + 1; // distinct, ascending: each block holds a distinct value range
+			}
+			var idx = SliceZ.build(values);
+			var allowed = new TreeSet<Integer>();
+			for (int i = 0; i < n; i++) {
+				if (random.nextInt(4) == 0) {
+					allowed.add(i);
+				}
+			}
+			var filter = bitmap(allowed.stream().mapToInt(Integer::intValue).toArray());
+
+			// values spread across blocks plus one out of range, so some blocks are skipped
+			long[] inVals = {5, BLOCK + 10, 2L * BLOCK + 3, n + 100L};
+			var inSet = new TreeSet<Long>();
+			for (long x : inVals) {
+				inSet.add(x);
+			}
+			assertQuery(values, allowed, inSet::contains, idx.in(filter.blockIterator(), inVals),
+					idx.countIn(filter.blockIterator(), inVals), idx.sumIn(filter.blockIterator(), inVals),
+					idx.meanIn(filter.blockIterator(), inVals));
+
+			long lo = BLOCK / 2;
+			long hi = BLOCK + BLOCK / 2;
+			assertQuery(values, allowed, v -> Long.compareUnsigned(v, lo) >= 0 && Long.compareUnsigned(v, hi) < 0,
+					idx.between(lo, hi, filter.blockIterator()), idx.countBetween(lo, hi, filter.blockIterator()),
+					idx.sumBetween(lo, hi, filter.blockIterator()), idx.meanBetween(lo, hi, filter.blockIterator()));
+
+			long eq = BLOCK + 5;
+			int[] eqIds = rowsWhere(values, v -> v == eq, allowed);
+			assertArrayEquals(eqIds, collect(idx.equal(eq, filter.blockIterator())), "equal ids");
+			assertEquals(eqIds.length, idx.countEqual(eq, filter.blockIterator()), "equal count");
+		}
+	}
+
+	@Test
+	void serializeMapRoundTrip() {
+		var random = new SplittableRandom(7L);
+		long[] values = new long[BLOCK + 1000];
+		for (int i = 0; i < values.length; i++) {
+			values[i] = random.nextLong(1_000_000);
+		}
+		var idx = SliceZ.build(values);
+		var mapped = SliceZ.map(idx.serialize());
+		for (long t : new long[]{0, 1, 5, 12345, 500_000, 999_999, 1_000_000}) {
+			assertArrayEquals(collect(idx.lessThanOrEqual(t)), collect(mapped.lessThanOrEqual(t)),
+					"lessThanOrEqual " + t);
+			assertEquals(idx.countGreaterThan(t), mapped.countGreaterThan(t), "countGreaterThan " + t);
+			assertEquals(idx.sumLessThanOrEqual(t), mapped.sumLessThanOrEqual(t), 1e-6, "sumLessThanOrEqual " + t);
+		}
+	}
+
+	@Test
+	void filteredCountCrossCheckUnsigned() {
+		var random = new SplittableRandom(555L);
+		for (int trial = 0; trial < 300; trial++) {
+			int n = 1 + random.nextInt(150);
+			long[] values = new long[n];
+			for (int i = 0; i < n; i++) {
+				values[i] = random.nextLong(); // full 64-bit range: large unsigned values
+			}
+			var idx = SliceZ.build(values);
+			var allowed = new TreeSet<Integer>();
+			for (int i = 0; i < n; i++) {
+				if (random.nextBoolean()) {
+					allowed.add(i);
+				}
+			}
+			var filter = bitmap(allowed.stream().mapToInt(Integer::intValue).toArray());
+			long t = random.nextInt(2) == 0 ? values[random.nextInt(n)] : random.nextLong();
+			long lo = random.nextLong();
+			long hi = random.nextLong();
+
+			countIds(values, allowed, v -> Long.compareUnsigned(v, t) > 0, idx.greaterThan(t, filter.blockIterator()),
+					idx.countGreaterThan(t, filter.blockIterator()));
+			countIds(values, allowed, v -> Long.compareUnsigned(v, t) <= 0,
+					idx.lessThanOrEqual(t, filter.blockIterator()),
+					idx.countLessThanOrEqual(t, filter.blockIterator()));
+			countIds(values, allowed, v -> v == t, idx.equal(t, filter.blockIterator()),
+					idx.countEqual(t, filter.blockIterator()));
+			countIds(values, allowed, v -> v != t, idx.notEqual(t, filter.blockIterator()),
+					idx.countNotEqual(t, filter.blockIterator()));
+			countIds(values, allowed, v -> Long.compareUnsigned(v, lo) >= 0 && Long.compareUnsigned(v, hi) < 0,
+					idx.between(lo, hi, filter.blockIterator()), idx.countBetween(lo, hi, filter.blockIterator()));
+		}
+	}
+
+	private static void countIds(long[] values, TreeSet<Integer> allowed, LongPredicate cond,
+			PrimitiveIterator.OfInt ids, int count) {
+		int[] rows = rowsWhere(values, cond, allowed);
+		assertArrayEquals(rows, collect(ids), "matching row ids");
+		assertEquals(rows.length, count, "count");
+	}
+
+	@Test
+	void histogramCrossCheck() {
+		var random = new SplittableRandom(9001L);
+		for (int trial = 0; trial < 300; trial++) {
+			int n = 1 + random.nextInt(200);
+			long[] data = new long[n];
+			long dom = random.nextInt(1000);
+			boolean skew = random.nextBoolean();
+			for (int i = 0; i < n; i++) {
+				data[i] = skew && random.nextInt(10) != 0 ? dom : random.nextInt(1000);
+			}
+			var idx = SliceZ.build(data);
+			long min = random.nextInt(1000);
+			int nb = 1 + random.nextInt(6);
+			long[] bounds = new long[nb];
+			for (int i = 0; i < nb; i++) {
+				bounds[i] = min + random.nextInt(1000); // every bound >= min
+			}
+			Arrays.sort(bounds); // ascending (may contain duplicates -> zero-width buckets)
+
+			long[] expected = new long[nb];
+			for (long v : data) {
+				if (Long.compareUnsigned(v, min) < 0) {
+					continue;
+				}
+				for (int i = 0; i < nb; i++) {
+					if (Long.compareUnsigned(v, bounds[i]) < 0) {
+						expected[i]++;
+						break;
+					}
+				}
+			}
+			assertArrayEquals(expected, idx.histogram(min, bounds),
+					() -> "min=" + min + " bounds=" + Arrays.toString(bounds));
+		}
+	}
+
+	@Test
+	void mapThroughBytesRoundTrip() {
+		// the natural persist/restore cycle: serialize -> raw bytes -> wrap -> map.
+		// A freshly wrapped ByteBuffer defaults to BIG_ENDIAN, and map() reads the
+		// header without forcing the little-endian order serialize() produced, so the
+		// round trip must still reproduce the index.
+		var idx = SliceZ.build(3, 1, 4, 1, 5, 9, 2, 6);
+		ByteBuffer serialized = idx.serialize();
+		byte[] bytes = new byte[serialized.capacity()];
+		serialized.duplicate().get(bytes);
+		var mapped = SliceZ.map(ByteBuffer.wrap(bytes));
+		assertArrayEquals(collect(idx.lessThanOrEqual(4)), collect(mapped.lessThanOrEqual(4)),
+				"map() must round-trip serialized bytes regardless of the buffer's byte order");
 	}
 
 	@Test
