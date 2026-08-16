@@ -62,6 +62,21 @@ class Util {
 		return position;
 	}
 
+	static int coveredSparseAndNot(long[] bitmap, ByteBuffer buffer, int position) {
+		// precondition: bitmap is logically full (every bit set); materialise that as
+		// all-ones and clear the sparse positions. No range is needed: reads honour the
+		// caller's range, so the bits past it are irrelevant.
+		Arrays.fill(bitmap, -1L);
+		int count = buffer.getChar(position);
+		position += Character.BYTES;
+		for (int j = 0; j < count; j++, position += Character.BYTES) {
+			int value = buffer.getChar(position);
+			bitmap[value >>> 6] &= ~(1L << value);
+		}
+		// postcondition: bitmap is neither empty nor full
+		return position;
+	}
+
 	static int sparseAndNot(long[] bitmap, ByteBuffer buffer, int position, int range) {
 		int count = buffer.getChar(position);
 		position += Character.BYTES;
@@ -141,11 +156,13 @@ class Util {
 		return filled ? -position : position;
 	}
 
-	static int coveredSparseOrNot(long[] bitmap, ByteBuffer buffer, int position, int max) {
-		// precondition: bitmap is empty
+	static int coveredSparseOrNot(long[] bitmap, ByteBuffer buffer, int position) {
+		// precondition: bitmap is empty; the result is all-ones minus the stored
+		// positions. No range is needed: reads honour the caller's range, so the bits
+		// past it are irrelevant.
+		Arrays.fill(bitmap, -1L);
 		int count = buffer.getChar(position);
 		position += Character.BYTES;
-		fillBitmap(bitmap, 0, max);
 		for (int j = 0; j < count; j++, position += Character.BYTES) {
 			int value = buffer.getChar(position);
 			bitmap[value >>> 6] ^= (1L << value);
