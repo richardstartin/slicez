@@ -1610,36 +1610,75 @@ public class SliceZ {
 					case SPARSE -> {
 						int count = data.getChar(position);
 						position += Character.BYTES;
-						for (int i = 0; i < count; i++) {
-							int row = data.getChar(position);
-							position += Character.BYTES;
-							if (row < range && filter.contains(row)) {
-								// fixme - this is probably going to be a bottleneck
-								values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
+						int end = position + count * Character.BYTES;
+						if (filter.isFull()) {
+							// every row passes, so rowIndex is null and no filter check is needed
+							for (int i = 0; i < count; i++) {
+								int row = data.getChar(position);
+								position += Character.BYTES;
+								if (row >= range) {
+									// positions are ascending; the rest are padding beyond range
+									break;
+								}
+								values[row] |= bit;
+							}
+						} else if (!filter.isEmpty()) {
+							for (int i = 0; i < count; i++) {
+								int row = data.getChar(position);
+								position += Character.BYTES;
+								if (row >= range) {
+									break;
+								}
+								if (filter.contains(row)) {
+									values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
+								}
 							}
 						}
+						// advance as if the whole payload was consumed
+						position = end;
 					}
 					case SPARSE_INVERTED -> {
 						int count = data.getChar(position);
 						position += Character.BYTES;
-						int prev = 0;
-						for (int i = 0; i < count; i++) {
-							int next = data.getChar(position);
-							position += Character.BYTES;
-							for (int row = prev; row < next; row++) {
-								if (row < range && filter.contains(row)) {
-									// fixme - this is probably going to be a bottleneck
+						int end = position + count * Character.BYTES;
+						// stop once the reconstructed rows reach range: the remaining gaps lie
+						// entirely in the padding beyond it
+						if (filter.isFull()) {
+							// every row passes, so rowIndex is null and no filter check is needed
+							int prev = 0;
+							for (int i = 0; i < count && prev < range; i++) {
+								int next = data.getChar(position);
+								position += Character.BYTES;
+								int hi = Math.min(next, range);
+								for (int row = prev; row < hi; row++) {
+									values[row] |= bit;
+								}
+								prev = next + 1;
+							}
+							for (int row = prev; row < range; row++) {
+								values[row] |= bit;
+							}
+						} else if (!filter.isEmpty()) {
+							int prev = 0;
+							for (int i = 0; i < count && prev < range; i++) {
+								int next = data.getChar(position);
+								position += Character.BYTES;
+								int hi = Math.min(next, range);
+								for (int row = prev; row < hi; row++) {
+									if (filter.contains(row)) {
+										values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
+									}
+								}
+								prev = next + 1;
+							}
+							for (int row = prev; row < range; row++) {
+								if (filter.contains(row)) {
 									values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
 								}
 							}
-							prev = next + 1;
 						}
-						for (int row = prev; row < range; row++) {
-							if (filter.contains(row)) {
-								// fixme - this is probably going to be a bottleneck
-								values[rowIndex == null ? row : Arrays.binarySearch(rowIndex, row)] |= bit;
-							}
-						}
+						// advance as if the whole payload was consumed
+						position = end;
 					}
 					case DENSE -> {
 						if (!filter.isEmpty()) {
