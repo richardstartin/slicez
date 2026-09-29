@@ -71,14 +71,14 @@ public class KTailBenchmark {
 
 	@Benchmark
 	public void sliceZBottomK(SliceZState s, Blackhole bh) {
-		PrimitiveIterator.OfInt it = s.index.bottom(s.k);
+		PrimitiveIterator.OfInt it = s.index.bottom(s.k).rowIds();
 		while (it.hasNext())
 			bh.consume(it.nextInt());
 	}
 
 	@Benchmark
 	public void sliceZTopK(SliceZState s, Blackhole bh) {
-		PrimitiveIterator.OfInt it = s.index.top(s.k);
+		PrimitiveIterator.OfInt it = s.index.top(s.k).rowIds();
 		while (it.hasNext())
 			bh.consume(it.nextInt());
 	}

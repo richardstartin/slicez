@@ -59,7 +59,7 @@ class TestBottomK {
 		for (long v : data)
 			appender.add(v);
 		var idx = appender.build();
-		int[] rows = collect(idx.bottom(k));
+		int[] rows = collect(idx.bottom(k).rowIds());
 		assertEquals(Math.min(k, data.length), rows.length, "count mismatch for k=" + k);
 		assertArrayEquals(referenceBottomK(data, k), sortedValues(data, rows), "values mismatch for k=" + k);
 	}
@@ -69,7 +69,7 @@ class TestBottomK {
 		for (long v : data)
 			appender.add(v);
 		var idx = appender.build();
-		int[] rows = collect(idx.top(k));
+		int[] rows = collect(idx.top(k).rowIds());
 		assertEquals(Math.min(k, data.length), rows.length, "count mismatch for k=" + k);
 		assertArrayEquals(referenceTopK(data, k), sortedValues(data, rows), "values mismatch for k=" + k);
 	}
@@ -123,17 +123,17 @@ class TestBottomK {
 	@Test
 	void bottomEmptyIndexAlwaysEmpty() {
 		var idx = SliceZ.build();
-		assertEquals(0, collect(idx.bottom(0)).length);
-		assertEquals(0, collect(idx.bottom(1)).length);
-		assertEquals(0, collect(idx.bottom(1000)).length);
+		assertEquals(0, collect(idx.bottom(0).rowIds()).length);
+		assertEquals(0, collect(idx.bottom(1).rowIds()).length);
+		assertEquals(0, collect(idx.bottom(1000).rowIds()).length);
 	}
 
 	@Test
 	void topEmptyIndexAlwaysEmpty() {
 		var idx = SliceZ.build();
-		assertEquals(0, collect(idx.top(0)).length);
-		assertEquals(0, collect(idx.top(1)).length);
-		assertEquals(0, collect(idx.top(1000)).length);
+		assertEquals(0, collect(idx.top(0).rowIds()).length);
+		assertEquals(0, collect(idx.top(1).rowIds()).length);
+		assertEquals(0, collect(idx.top(1000).rowIds()).length);
 	}
 
 	@Test
@@ -173,11 +173,11 @@ class TestBottomK {
 		for (long v : data)
 			appender.add(v);
 		var idx = appender.build();
-		assertEquals(0, collect(idx.bottom(0)).length);
-		assertEquals(1, collect(idx.bottom(1)).length);
-		assertEquals(4, collect(idx.bottom(4)).length);
-		assertEquals(8, collect(idx.bottom(8)).length);
-		assertEquals(8, collect(idx.bottom(100)).length);
+		assertEquals(0, collect(idx.bottom(0).rowIds()).length);
+		assertEquals(1, collect(idx.bottom(1).rowIds()).length);
+		assertEquals(4, collect(idx.bottom(4).rowIds()).length);
+		assertEquals(8, collect(idx.bottom(8).rowIds()).length);
+		assertEquals(8, collect(idx.bottom(100).rowIds()).length);
 	}
 
 	@Test
@@ -187,11 +187,11 @@ class TestBottomK {
 		for (long v : data)
 			appender.add(v);
 		var idx = appender.build();
-		assertEquals(0, collect(idx.top(0)).length);
-		assertEquals(1, collect(idx.top(1)).length);
-		assertEquals(4, collect(idx.top(4)).length);
-		assertEquals(8, collect(idx.top(8)).length);
-		assertEquals(8, collect(idx.top(100)).length);
+		assertEquals(0, collect(idx.top(0).rowIds()).length);
+		assertEquals(1, collect(idx.top(1).rowIds()).length);
+		assertEquals(4, collect(idx.top(4).rowIds()).length);
+		assertEquals(8, collect(idx.top(8).rowIds()).length);
+		assertEquals(8, collect(idx.top(100).rowIds()).length);
 	}
 
 	@Test
@@ -202,7 +202,7 @@ class TestBottomK {
 		for (long v : data)
 			appender.add(v);
 		var idx = appender.build();
-		int[] rows = collect(idx.bottom(1));
+		int[] rows = collect(idx.bottom(1).rowIds());
 		assertEquals(1, rows.length);
 		assertEquals(idx.min(), data[rows[0]]);
 	}
@@ -215,7 +215,7 @@ class TestBottomK {
 		for (long v : data)
 			appender.add(v);
 		var idx = appender.build();
-		int[] rows = collect(idx.top(1));
+		int[] rows = collect(idx.top(1).rowIds());
 		assertEquals(1, rows.length);
 		assertEquals(idx.max(), data[rows[0]]);
 	}
@@ -262,7 +262,7 @@ class TestBottomK {
 		var idx = appender.build();
 		long[] all = referenceBottomK(data, data.length);
 		for (int k = 1; k <= data.length; k++) {
-			int[] rows = collect(idx.bottom(k));
+			int[] rows = collect(idx.bottom(k).rowIds());
 			assertArrayEquals(Arrays.copyOf(all, k), sortedValues(data, rows), "prefix mismatch at k=" + k);
 		}
 	}
@@ -277,7 +277,7 @@ class TestBottomK {
 		var idx = appender.build();
 		long[] all = referenceTopK(data, data.length);
 		for (int k = 1; k <= data.length; k++) {
-			int[] rows = collect(idx.top(k));
+			int[] rows = collect(idx.top(k).rowIds());
 			assertArrayEquals(Arrays.copyOfRange(all, Math.max(0, all.length - k), all.length),
 					sortedValues(data, rows), "prefix mismatch at k=" + k);
 		}
@@ -438,7 +438,7 @@ class TestBottomK {
 		for (int i = 0; i < BLOCK_SIZE; i++)
 			data[i] = 101 + i;
 		data[BLOCK_SIZE] = 1L;
-		int[] rows = collect(idx.bottom(3));
+		int[] rows = collect(idx.bottom(3).rowIds());
 		assertEquals(3, rows.length);
 		assertArrayEquals(referenceBottomK(data, 3), sortedValues(data, rows));
 	}
@@ -464,7 +464,7 @@ class TestBottomK {
 		for (int i = 0; i < BLOCK_SIZE; i++)
 			data[i] = i + 1;
 		data[BLOCK_SIZE] = BLOCK_SIZE + 1000L;
-		int[] rows = collect(idx.top(3));
+		int[] rows = collect(idx.top(3).rowIds());
 		assertEquals(3, rows.length);
 		assertArrayEquals(referenceTopK(data, 3), sortedValues(data, rows));
 	}

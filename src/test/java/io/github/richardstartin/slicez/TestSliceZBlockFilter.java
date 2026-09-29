@@ -98,7 +98,7 @@ class TestSliceZBlockFilter {
 		// data {1, 2, 2}, filter {1}: only row 1 (value 2) survives
 		var idx = SliceZ.build(1, 2, 2);
 		assertEquals(1, idx.countEqual(2, bitmap(1).blockIterator()));
-		assertArrayEquals(new int[]{1}, collect(idx.equal(2, bitmap(1).blockIterator())));
+		assertArrayEquals(new int[]{1}, collect(idx.equal(2, bitmap(1).blockIterator()).rowIds()));
 	}
 
 	@Test
@@ -108,7 +108,7 @@ class TestSliceZBlockFilter {
 		var filter = bitmap(1, 3, 4);
 		var allowed = rowSet(1, 3, 4);
 		int[] rows = rowsWhere(values, v -> v == 2, allowed);
-		assertArrayEquals(rows, collect(idx.equal(2, filter.blockIterator())));
+		assertArrayEquals(rows, collect(idx.equal(2, filter.blockIterator()).rowIds()));
 		assertEquals(rows.length, idx.countEqual(2, filter.blockIterator()));
 	}
 
@@ -118,7 +118,7 @@ class TestSliceZBlockFilter {
 		var idx = SliceZ.build(values);
 		var filter = bitmap(0, 2, 3);
 		var allowed = rowSet(0, 2, 3);
-		assertQuery(values, allowed, v -> v != 2, idx.notEqual(2, filter.blockIterator()),
+		assertQuery(values, allowed, v -> v != 2, idx.notEqual(2, filter.blockIterator()).rowIds(),
 				idx.countNotEqual(2, filter.blockIterator()), idx.sumNotEqual(2, filter.blockIterator()),
 				idx.meanNotEqual(2, filter.blockIterator()));
 	}
@@ -130,8 +130,9 @@ class TestSliceZBlockFilter {
 		var filter = bitmap(1, 2, 5, 7);
 		var allowed = rowSet(1, 2, 5, 7);
 		assertQuery(values, allowed, v -> Long.compareUnsigned(v, 4) <= 0,
-				idx.lessThanOrEqual(4, filter.blockIterator()), idx.countLessThanOrEqual(4, filter.blockIterator()),
-				idx.sumLessThanOrEqual(4, filter.blockIterator()), idx.meanLessThanOrEqual(4, filter.blockIterator()));
+				idx.lessThanOrEqual(4, filter.blockIterator()).rowIds(),
+				idx.countLessThanOrEqual(4, filter.blockIterator()), idx.sumLessThanOrEqual(4, filter.blockIterator()),
+				idx.meanLessThanOrEqual(4, filter.blockIterator()));
 	}
 
 	@Test
@@ -140,9 +141,9 @@ class TestSliceZBlockFilter {
 		var idx = SliceZ.build(values);
 		var filter = bitmap(1, 2, 5, 7);
 		var allowed = rowSet(1, 2, 5, 7);
-		assertQuery(values, allowed, v -> Long.compareUnsigned(v, 4) > 0, idx.greaterThan(4, filter.blockIterator()),
-				idx.countGreaterThan(4, filter.blockIterator()), idx.sumGreaterThan(4, filter.blockIterator()),
-				idx.meanGreaterThan(4, filter.blockIterator()));
+		assertQuery(values, allowed, v -> Long.compareUnsigned(v, 4) > 0,
+				idx.greaterThan(4, filter.blockIterator()).rowIds(), idx.countGreaterThan(4, filter.blockIterator()),
+				idx.sumGreaterThan(4, filter.blockIterator()), idx.meanGreaterThan(4, filter.blockIterator()));
 	}
 
 	@Test
@@ -152,7 +153,7 @@ class TestSliceZBlockFilter {
 		var filter = bitmap(1, 3, 4, 6, 8);
 		var allowed = rowSet(1, 3, 4, 6, 8);
 		assertQuery(values, allowed, v -> Long.compareUnsigned(v, 3) >= 0 && Long.compareUnsigned(v, 7) < 0,
-				idx.between(3, 7, filter.blockIterator()), idx.countBetween(3, 7, filter.blockIterator()),
+				idx.between(3, 7, filter.blockIterator()).rowIds(), idx.countBetween(3, 7, filter.blockIterator()),
 				idx.sumBetween(3, 7, filter.blockIterator()), idx.meanBetween(3, 7, filter.blockIterator()));
 	}
 
@@ -166,7 +167,7 @@ class TestSliceZBlockFilter {
 		var filter = bitmap(1, 3);
 		var allowed = rowSet(1, 3);
 		assertQuery(values, allowed, v -> Long.compareUnsigned(v, 5) >= 0 && Long.compareUnsigned(v, 60) < 0,
-				idx.between(5, 60, filter.blockIterator()), idx.countBetween(5, 60, filter.blockIterator()),
+				idx.between(5, 60, filter.blockIterator()).rowIds(), idx.countBetween(5, 60, filter.blockIterator()),
 				idx.sumBetween(5, 60, filter.blockIterator()), idx.meanBetween(5, 60, filter.blockIterator()));
 	}
 
@@ -237,22 +238,25 @@ class TestSliceZBlockFilter {
 			long eq = base + random.nextInt(spread);
 
 			assertQuery(values, allowed, v -> Long.compareUnsigned(v, t) > 0,
-					idx.greaterThan(t, filter.blockIterator()), idx.countGreaterThan(t, filter.blockIterator()),
-					idx.sumGreaterThan(t, filter.blockIterator()), idx.meanGreaterThan(t, filter.blockIterator()));
+					idx.greaterThan(t, filter.blockIterator()).rowIds(),
+					idx.countGreaterThan(t, filter.blockIterator()), idx.sumGreaterThan(t, filter.blockIterator()),
+					idx.meanGreaterThan(t, filter.blockIterator()));
 			assertQuery(values, allowed, v -> Long.compareUnsigned(v, t) <= 0,
-					idx.lessThanOrEqual(t, filter.blockIterator()), idx.countLessThanOrEqual(t, filter.blockIterator()),
+					idx.lessThanOrEqual(t, filter.blockIterator()).rowIds(),
+					idx.countLessThanOrEqual(t, filter.blockIterator()),
 					idx.sumLessThanOrEqual(t, filter.blockIterator()),
 					idx.meanLessThanOrEqual(t, filter.blockIterator()));
-			assertQuery(values, allowed, v -> v != eq, idx.notEqual(eq, filter.blockIterator()),
+			assertQuery(values, allowed, v -> v != eq, idx.notEqual(eq, filter.blockIterator()).rowIds(),
 					idx.countNotEqual(eq, filter.blockIterator()), idx.sumNotEqual(eq, filter.blockIterator()),
 					idx.meanNotEqual(eq, filter.blockIterator()));
 			assertQuery(values, allowed, v -> Long.compareUnsigned(v, lo) >= 0 && Long.compareUnsigned(v, hi) < 0,
-					idx.between(lo, hi, filter.blockIterator()), idx.countBetween(lo, hi, filter.blockIterator()),
-					idx.sumBetween(lo, hi, filter.blockIterator()), idx.meanBetween(lo, hi, filter.blockIterator()));
+					idx.between(lo, hi, filter.blockIterator()).rowIds(),
+					idx.countBetween(lo, hi, filter.blockIterator()), idx.sumBetween(lo, hi, filter.blockIterator()),
+					idx.meanBetween(lo, hi, filter.blockIterator()));
 
 			// equal (no filtered sum/mean overloads, so check ids and count only)
 			int[] eqIds = rowsWhere(values, v -> v == eq, allowed);
-			assertArrayEquals(eqIds, collect(idx.equal(eq, filter.blockIterator())), "equal ids");
+			assertArrayEquals(eqIds, collect(idx.equal(eq, filter.blockIterator()).rowIds()), "equal ids");
 			assertEquals(eqIds.length, idx.countEqual(eq, filter.blockIterator()), "equal count");
 
 			// unfiltered greaterThanOrEqual / lessThan (their value==0 and value-1
@@ -262,19 +266,20 @@ class TestSliceZBlockFilter {
 				allRows.add(i);
 			}
 			long gte = random.nextInt(3) == 0 ? 0 : t;
-			assertQuery(values, allRows, v -> Long.compareUnsigned(v, gte) >= 0, idx.greaterThanOrEqual(gte),
+			assertQuery(values, allRows, v -> Long.compareUnsigned(v, gte) >= 0, idx.greaterThanOrEqual(gte).rowIds(),
 					idx.countGreaterThanOrEqual(gte), idx.sumGreaterThanOrEqual(gte), idx.meanGreaterThanOrEqual(gte));
 
 			// unfiltered fast-path families (IterateAllBlocks is trivial, so these hit the
 			// isTrivial() all-rows / rowCount shortcuts at the edge thresholds)
-			assertQuery(values, allRows, v -> Long.compareUnsigned(v, t) <= 0, idx.lessThanOrEqual(t),
+			assertQuery(values, allRows, v -> Long.compareUnsigned(v, t) <= 0, idx.lessThanOrEqual(t).rowIds(),
 					idx.countLessThanOrEqual(t), idx.sumLessThanOrEqual(t), idx.meanLessThanOrEqual(t));
-			assertQuery(values, allRows, v -> Long.compareUnsigned(v, t) > 0, idx.greaterThan(t),
+			assertQuery(values, allRows, v -> Long.compareUnsigned(v, t) > 0, idx.greaterThan(t).rowIds(),
 					idx.countGreaterThan(t), idx.sumGreaterThan(t), idx.meanGreaterThan(t));
 			assertQuery(values, allRows, v -> Long.compareUnsigned(v, lo) >= 0 && Long.compareUnsigned(v, hi) < 0,
-					idx.between(lo, hi), idx.countBetween(lo, hi), idx.sumBetween(lo, hi), idx.meanBetween(lo, hi));
+					idx.between(lo, hi).rowIds(), idx.countBetween(lo, hi), idx.sumBetween(lo, hi),
+					idx.meanBetween(lo, hi));
 			long ltv = random.nextInt(3) == 0 ? 0 : t;
-			assertQuery(values, allRows, v -> Long.compareUnsigned(v, ltv) < 0, idx.lessThan(ltv),
+			assertQuery(values, allRows, v -> Long.compareUnsigned(v, ltv) < 0, idx.lessThan(ltv).rowIds(),
 					idx.countLessThan(ltv), idx.sumLessThan(ltv), idx.meanLessThan(ltv));
 
 			// in with a mix of present and absent values (exercises InQuery)
@@ -285,7 +290,7 @@ class TestSliceZBlockFilter {
 				inVals[j] = base - 1 + random.nextInt(spread + 2);
 				inSet.add(inVals[j]);
 			}
-			assertQuery(values, allowed, inSet::contains, idx.in(filter.blockIterator(), inVals),
+			assertQuery(values, allowed, inSet::contains, idx.in(filter.blockIterator(), inVals).rowIds(),
 					idx.countIn(filter.blockIterator(), inVals), idx.sumIn(filter.blockIterator(), inVals),
 					idx.meanIn(filter.blockIterator(), inVals));
 		}
@@ -315,19 +320,20 @@ class TestSliceZBlockFilter {
 			for (long x : inVals) {
 				inSet.add(x);
 			}
-			assertQuery(values, allowed, inSet::contains, idx.in(filter.blockIterator(), inVals),
+			assertQuery(values, allowed, inSet::contains, idx.in(filter.blockIterator(), inVals).rowIds(),
 					idx.countIn(filter.blockIterator(), inVals), idx.sumIn(filter.blockIterator(), inVals),
 					idx.meanIn(filter.blockIterator(), inVals));
 
 			long lo = BLOCK / 2;
 			long hi = BLOCK + BLOCK / 2;
 			assertQuery(values, allowed, v -> Long.compareUnsigned(v, lo) >= 0 && Long.compareUnsigned(v, hi) < 0,
-					idx.between(lo, hi, filter.blockIterator()), idx.countBetween(lo, hi, filter.blockIterator()),
-					idx.sumBetween(lo, hi, filter.blockIterator()), idx.meanBetween(lo, hi, filter.blockIterator()));
+					idx.between(lo, hi, filter.blockIterator()).rowIds(),
+					idx.countBetween(lo, hi, filter.blockIterator()), idx.sumBetween(lo, hi, filter.blockIterator()),
+					idx.meanBetween(lo, hi, filter.blockIterator()));
 
 			long eq = BLOCK + 5;
 			int[] eqIds = rowsWhere(values, v -> v == eq, allowed);
-			assertArrayEquals(eqIds, collect(idx.equal(eq, filter.blockIterator())), "equal ids");
+			assertArrayEquals(eqIds, collect(idx.equal(eq, filter.blockIterator()).rowIds()), "equal ids");
 			assertEquals(eqIds.length, idx.countEqual(eq, filter.blockIterator()), "equal count");
 		}
 	}
@@ -342,7 +348,7 @@ class TestSliceZBlockFilter {
 		var idx = SliceZ.build(values);
 		var mapped = SliceZ.map(idx.serialize());
 		for (long t : new long[]{0, 1, 5, 12345, 500_000, 999_999, 1_000_000}) {
-			assertArrayEquals(collect(idx.lessThanOrEqual(t)), collect(mapped.lessThanOrEqual(t)),
+			assertArrayEquals(collect(idx.lessThanOrEqual(t).rowIds()), collect(mapped.lessThanOrEqual(t).rowIds()),
 					"lessThanOrEqual " + t);
 			assertEquals(idx.countGreaterThan(t), mapped.countGreaterThan(t), "countGreaterThan " + t);
 			assertEquals(idx.sumLessThanOrEqual(t), mapped.sumLessThanOrEqual(t), 1e-6, "sumLessThanOrEqual " + t);
@@ -370,17 +376,19 @@ class TestSliceZBlockFilter {
 			long lo = random.nextLong();
 			long hi = random.nextLong();
 
-			countIds(values, allowed, v -> Long.compareUnsigned(v, t) > 0, idx.greaterThan(t, filter.blockIterator()),
+			countIds(values, allowed, v -> Long.compareUnsigned(v, t) > 0,
+					idx.greaterThan(t, filter.blockIterator()).rowIds(),
 					idx.countGreaterThan(t, filter.blockIterator()));
 			countIds(values, allowed, v -> Long.compareUnsigned(v, t) <= 0,
-					idx.lessThanOrEqual(t, filter.blockIterator()),
+					idx.lessThanOrEqual(t, filter.blockIterator()).rowIds(),
 					idx.countLessThanOrEqual(t, filter.blockIterator()));
-			countIds(values, allowed, v -> v == t, idx.equal(t, filter.blockIterator()),
+			countIds(values, allowed, v -> v == t, idx.equal(t, filter.blockIterator()).rowIds(),
 					idx.countEqual(t, filter.blockIterator()));
-			countIds(values, allowed, v -> v != t, idx.notEqual(t, filter.blockIterator()),
+			countIds(values, allowed, v -> v != t, idx.notEqual(t, filter.blockIterator()).rowIds(),
 					idx.countNotEqual(t, filter.blockIterator()));
 			countIds(values, allowed, v -> Long.compareUnsigned(v, lo) >= 0 && Long.compareUnsigned(v, hi) < 0,
-					idx.between(lo, hi, filter.blockIterator()), idx.countBetween(lo, hi, filter.blockIterator()));
+					idx.between(lo, hi, filter.blockIterator()).rowIds(),
+					idx.countBetween(lo, hi, filter.blockIterator()));
 		}
 	}
 
@@ -439,7 +447,7 @@ class TestSliceZBlockFilter {
 		byte[] bytes = new byte[serialized.capacity()];
 		serialized.duplicate().get(bytes);
 		var mapped = SliceZ.map(ByteBuffer.wrap(bytes));
-		assertArrayEquals(collect(idx.lessThanOrEqual(4)), collect(mapped.lessThanOrEqual(4)),
+		assertArrayEquals(collect(idx.lessThanOrEqual(4).rowIds()), collect(mapped.lessThanOrEqual(4).rowIds()),
 				"map() must round-trip serialized bytes regardless of the buffer's byte order");
 	}
 
@@ -455,7 +463,7 @@ class TestSliceZBlockFilter {
 		for (int r : rows) {
 			sum += values[r];
 		}
-		assertArrayEquals(rows, collect(idx.in(filter.blockIterator(), 2, 3)));
+		assertArrayEquals(rows, collect(idx.in(filter.blockIterator(), 2, 3).rowIds()));
 		assertEquals(rows.length, idx.countIn(filter.blockIterator(), 2, 3));
 		assertEquals(sum, idx.sumIn(filter.blockIterator(), 2, 3), 1e-9);
 		assertEquals(rows.length == 0 ? 0 : sum / rows.length, idx.meanIn(filter.blockIterator(), 2, 3), 1e-9);
@@ -467,7 +475,7 @@ class TestSliceZBlockFilter {
 		long[] values = {1, 2, 2, 3, 2};
 		var idx = SliceZ.build(values);
 		var all = bitmap(0, 1, 2, 3, 4);
-		assertArrayEquals(collect(idx.equal(2)), collect(idx.equal(2, all.blockIterator())));
+		assertArrayEquals(collect(idx.equal(2).rowIds()), collect(idx.equal(2, all.blockIterator()).rowIds()));
 		assertEquals(idx.countEqual(2), idx.countEqual(2, all.blockIterator()));
 	}
 
@@ -483,7 +491,7 @@ class TestSliceZBlockFilter {
 		var b = bitmap(3, 4, 5, 6);
 		var allowed = rowSet(3, 4); // intersection
 		int[] rows = rowsWhere(values, v -> v == 5, allowed);
-		assertArrayEquals(rows, collect(idx.equal(5, a.and(b))));
+		assertArrayEquals(rows, collect(idx.equal(5, a.and(b)).rowIds()));
 		assertEquals(rows.length, idx.countEqual(5, a.and(b)));
 	}
 
@@ -495,7 +503,7 @@ class TestSliceZBlockFilter {
 		var b = bitmap(3, 4, 5, 6, 7, 8);
 		var allowed = rowSet(3, 4, 5, 6); // intersection
 		assertQuery(values, allowed, v -> Long.compareUnsigned(v, 4) >= 0 && Long.compareUnsigned(v, 8) < 0,
-				idx.between(4, 8, a.and(b)), idx.countBetween(4, 8, a.and(b)), idx.sumBetween(4, 8, a.and(b)),
+				idx.between(4, 8, a.and(b)).rowIds(), idx.countBetween(4, 8, a.and(b)), idx.sumBetween(4, 8, a.and(b)),
 				idx.meanBetween(4, 8, a.and(b)));
 	}
 
@@ -507,7 +515,7 @@ class TestSliceZBlockFilter {
 		var b = bitmap(4, 5);
 		var allowed = rowSet(0, 1, 2, 4, 5); // union
 		int[] rows = rowsWhere(values, v -> v == 5, allowed);
-		assertArrayEquals(rows, collect(idx.equal(5, a.or(b))));
+		assertArrayEquals(rows, collect(idx.equal(5, a.or(b)).rowIds()));
 		assertEquals(rows.length, idx.countEqual(5, a.or(b)));
 	}
 
@@ -518,7 +526,7 @@ class TestSliceZBlockFilter {
 		var a = bitmap(0, 1, 2);
 		var b = bitmap(4, 5);
 		var allowed = rowSet(0, 1, 2, 4, 5); // union
-		assertQuery(values, allowed, v -> Long.compareUnsigned(v, 3) <= 0, idx.lessThanOrEqual(3, a.or(b)),
+		assertQuery(values, allowed, v -> Long.compareUnsigned(v, 3) <= 0, idx.lessThanOrEqual(3, a.or(b)).rowIds(),
 				idx.countLessThanOrEqual(3, a.or(b)), idx.sumLessThanOrEqual(3, a.or(b)),
 				idx.meanLessThanOrEqual(3, a.or(b)));
 	}
@@ -541,7 +549,7 @@ class TestSliceZBlockFilter {
 		var filter = bitmap(3, 13, 100, 2 * BLOCK + 931, 2 * BLOCK + 18931);
 		var allowed = rowSet(3, 13, 100, 2 * BLOCK + 931, 2 * BLOCK + 18931);
 		int[] rows = rowsWhere(values, v -> v == 3, allowed);
-		assertArrayEquals(rows, collect(idx.equal(3, filter.blockIterator())));
+		assertArrayEquals(rows, collect(idx.equal(3, filter.blockIterator()).rowIds()));
 		assertEquals(rows.length, idx.countEqual(3, filter.blockIterator()));
 	}
 
@@ -557,7 +565,7 @@ class TestSliceZBlockFilter {
 		var idx = SliceZ.build(values);
 		var filter = bitmap(0, 5, 100);
 		// every row satisfies notEqual(0), so only the three filtered rows survive
-		assertArrayEquals(new int[]{0, 5, 100}, collect(idx.notEqual(0, filter.blockIterator())));
+		assertArrayEquals(new int[]{0, 5, 100}, collect(idx.notEqual(0, filter.blockIterator()).rowIds()));
 		assertEquals(3, idx.countNotEqual(0, filter.blockIterator()));
 	}
 
@@ -575,10 +583,10 @@ class TestSliceZBlockFilter {
 		// threshold above max: lessThanOrEqual matches every row, but only row 1 is
 		// kept
 		assertEquals(1, idx.countLessThanOrEqual(6, filter.blockIterator()));
-		assertArrayEquals(new int[]{1}, collect(idx.lessThanOrEqual(6, filter.blockIterator())));
+		assertArrayEquals(new int[]{1}, collect(idx.lessThanOrEqual(6, filter.blockIterator()).rowIds()));
 
 		// threshold below min: greaterThan matches every row, but only row 1 is kept
 		assertEquals(1, idx.countGreaterThan(4, filter.blockIterator()));
-		assertArrayEquals(new int[]{1}, collect(idx.greaterThan(4, filter.blockIterator())));
+		assertArrayEquals(new int[]{1}, collect(idx.greaterThan(4, filter.blockIterator()).rowIds()));
 	}
 }

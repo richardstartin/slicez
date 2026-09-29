@@ -92,7 +92,7 @@ class TestBottomKValues {
 		assertEquals(Math.min(k, data.length), values.length, "count mismatch for k=" + k);
 		assertArrayEquals(referenceBottomK(data, k), sortedUnsigned(values), "values mismatch for k=" + k);
 		// consistency with bottom(k): same multiset of values as the rows it returns
-		int[] rows = collect(idx.bottom(k));
+		int[] rows = collect(idx.bottom(k).rowIds());
 		assertArrayEquals(sortedValues(data, rows), sortedUnsigned(values),
 				"bottomValues inconsistent with bottom for k=" + k);
 	}
@@ -103,7 +103,7 @@ class TestBottomKValues {
 		assertEquals(Math.min(k, data.length), values.length, "count mismatch for k=" + k);
 		assertArrayEquals(referenceTopK(data, k), sortedUnsigned(values), "values mismatch for k=" + k);
 		// consistency with top(k): same multiset of values as the rows it returns
-		int[] rows = collect(idx.top(k));
+		int[] rows = collect(idx.top(k).rowIds());
 		assertArrayEquals(sortedValues(data, rows), sortedUnsigned(values),
 				"topValues inconsistent with top for k=" + k);
 	}
@@ -249,7 +249,7 @@ class TestBottomKValues {
 		var idx = build(data);
 		for (int k = 0; k <= data.length + 2; k++) {
 			long[] values = sortedUnsigned(collect(idx.bottomValues(k)));
-			long[] fromRows = sortedValues(data, collect(idx.bottom(k)));
+			long[] fromRows = sortedValues(data, collect(idx.bottom(k).rowIds()));
 			assertArrayEquals(fromRows, values, "mismatch at k=" + k);
 		}
 	}
@@ -260,7 +260,7 @@ class TestBottomKValues {
 		var idx = build(data);
 		for (int k = 0; k <= data.length + 2; k++) {
 			long[] values = sortedUnsigned(collect(idx.topValues(k)));
-			long[] fromRows = sortedValues(data, collect(idx.top(k)));
+			long[] fromRows = sortedValues(data, collect(idx.top(k).rowIds()));
 			assertArrayEquals(fromRows, values, "mismatch at k=" + k);
 		}
 	}
