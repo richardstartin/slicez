@@ -107,7 +107,7 @@ public class InQueryBenchmark {
 
 	@Benchmark
 	public void SliceZIn(SliceZState s, Blackhole bh) {
-		PrimitiveIterator.OfInt it = s.index.in(s.queryValues);
+		PrimitiveIterator.OfInt it = s.index.in(s.queryValues).rowIds();
 		while (it.hasNext())
 			bh.consume(it.nextInt());
 	}

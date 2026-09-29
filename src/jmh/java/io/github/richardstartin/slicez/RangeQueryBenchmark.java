@@ -117,7 +117,7 @@ public class RangeQueryBenchmark {
 
 	@Benchmark
 	public void SliceZBetween(SliceZState s, Blackhole bh) {
-		PrimitiveIterator.OfInt it = s.index.between(s.lower, s.upper);
+		PrimitiveIterator.OfInt it = s.index.between(s.lower, s.upper).rowIds();
 		while (it.hasNext())
 			bh.consume(it.nextInt());
 	}

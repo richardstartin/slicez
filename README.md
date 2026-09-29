@@ -50,53 +50,55 @@ SliceZ index = appender.build();
 
 ### Querying
 
-Each predicate is available in four forms: an iterator over matching row indices (`…`), a count (`count…`), a sum of the matching values (`sum…`), and an arithmetic mean (`mean…`).
+Each predicate is available in four forms: a `ResultIterator` identifying the matching rows (`…`), a count (`count…`), a sum of the matching values (`sum…`), and an arithmetic mean (`mean…`).
+
+A `ResultIterator` does not materialise the matching row ids up front. Call `rowIds()` on it to iterate them as a `PrimitiveIterator.OfInt`, or pass it straight to another query to use it as a filter — see [Composing queries](#composing-queries).
 
 ```java
 // equality
-PrimitiveIterator.OfInt it = index.equal(42L);
+PrimitiveIterator.OfInt it = index.equal(42L).rowIds();
 int    count = index.countEqual(42L);
 double sum   = index.sumEqual(42L);
 double mean  = index.meanEqual(42L);    // == 42.0 when any row matches, else 0.0
 
 // range — lessThan / lessThanOrEqual / greaterThan / greaterThanOrEqual,
 // each with a matching count…, sum…, and mean… method
-it    = index.lessThan(1000L);
+it    = index.lessThan(1000L).rowIds();
 count = index.countLessThan(1000L);
 sum   = index.sumLessThan(1000L);
 mean  = index.meanLessThan(1000L);      // == sum / count when count > 0, else 0.0
 
-it    = index.greaterThanOrEqual(42L);
+it    = index.greaterThanOrEqual(42L).rowIds();
 count = index.countGreaterThanOrEqual(42L);
 sum   = index.sumGreaterThanOrEqual(42L);
 mean  = index.meanGreaterThanOrEqual(42L);
 
 // between(lower, upper) is half-open: lower <= value < upper
 // (inclusive lower bound, exclusive upper bound)
-it    = index.between(42L, 1000L);
+it    = index.between(42L, 1000L).rowIds();
 count = index.countBetween(42L, 1000L);
 sum   = index.sumBetween(42L, 1000L);
 mean  = index.meanBetween(42L, 1000L);
 
 // inequality and multi-value match
-it    = index.notEqual(42L);
+it    = index.notEqual(42L).rowIds();
 count = index.countNotEqual(42L);
 sum   = index.sumNotEqual(42L);
 mean  = index.meanNotEqual(42L);
 
-it    = index.in(1L, 42L, 1000L);
+it    = index.in(1L, 42L, 1000L).rowIds();
 count = index.countIn(1L, 42L, 1000L);
 sum   = index.sumIn(1L, 42L, 1000L);
 mean  = index.meanIn(1L, 42L, 1000L);
 
 // top-k / bottom-k by unsigned order; partial when fewer than k rows exist
-PrimitiveIterator.OfInt  topIds   = index.top(10);          // row ids
-PrimitiveIterator.OfInt  botIds   = index.bottom(10);
-PrimitiveIterator.OfLong topVals  = index.topValues(10);    // the values themselves
+PrimitiveIterator.OfInt  topIds   = index.top(10).rowIds();     // row ids
+PrimitiveIterator.OfInt  botIds   = index.bottom(10).rowIds();
+PrimitiveIterator.OfLong topVals  = index.topValues(10);        // the values themselves
 PrimitiveIterator.OfLong botVals  = index.bottomValues(10);
-long   topSum  = index.topSum(10);                          // sum of the top-10 values
+long   topSum  = index.topSum(10);                              // sum of the top-10 values
 long   botSum  = index.bottomSum(10);
-double botMean = index.bottomMean(10);                      // mean of the bottom-10 values
+double botMean = index.bottomMean(10);                          // mean of the bottom-10 values
 // decode each selected value before summing (e.g. when longs encode doubles)
 double topMagnitude = index.topSum(10, ord -> decode(ord));
 
@@ -108,6 +110,34 @@ long max = index.max();
 All comparisons use **unsigned** 64-bit order, so values are treated as unsigned longs regardless of sign.
 
 The `sum…` methods return a `double` and accumulate in floating point, so they do not overflow on large inputs or wide blocks. Each matching value contributes through the signed `(double)` conversion of its components, so totals are exact for the full unsigned range below `2^63`. The `topSum`/`bottomSum` methods that return `long` use wrapping two's-complement arithmetic, consistent with summing the `topValues`/`bottomValues` directly; the `LongToDoubleFunction` overloads decode each selected value first and accumulate in `double`.
+
+### Composing queries
+
+A `ResultIterator` is also a `BlockIterator`, so it can be fed back into another query as a filter. A filtered query keeps a row only when its own predicate holds **and** the row is admitted by the filter, so composing queries intersects them:
+
+```java
+// rows where 42 <= value < 1000, built from the two single-bound queries
+ResultIterator above = index.greaterThan(41L);
+PrimitiveIterator.OfInt it = index.lessThanOrEqual(999L, above).rowIds();
+// ...the same rows as index.between(42L, 1000L).rowIds()
+```
+
+The `count…`, `sum…` and `mean…` forms take a filter in the same position, and filters chain to any depth:
+
+```java
+ResultIterator inRange = index.lessThanOrEqual(999L, index.greaterThan(41L));
+int matching = index.countNotEqual(500L, inRange);
+```
+
+A `BlockedBitmap` is a `BlockIterator` too, so an externally supplied set of row ids is a filter in exactly the same position — as is the intersection or union of two of them:
+
+```java
+BlockedBitmap allowed = ...;
+int matching = index.countEqual(42L, allowed.blockIterator());
+int inBoth   = index.countEqual(42L, allowed.and(other));
+```
+
+A `ResultIterator` is single-pass and must be consumed one way or the other: either hand it to a query as a filter, or drain it through `rowIds()` — the two share a cursor, so doing both to the same instance will skip results.
 
 ### Floating-point values
 
@@ -130,7 +160,7 @@ SliceZ index = appender.build();
 
 // Query by mapping the threshold the same way
 double threshold = 3.14;
-PrimitiveIterator.OfInt it = index.lessThanOrEqual(ordinal(threshold));
+PrimitiveIterator.OfInt it = index.lessThanOrEqual(ordinal(threshold)).rowIds();
 ```
 
 ### Persistence

@@ -3,10 +3,10 @@ package io.github.richardstartin.slicez;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
+import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
 import java.util.function.LongConsumer;
 import java.util.function.LongToDoubleFunction;
-import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 
 /**
@@ -21,11 +21,18 @@ import java.util.stream.LongStream;
  * {@link Appender}.
  *
  * <p>
- * Query methods come in four flavours: those returning a
- * {@link PrimitiveIterator.OfInt} yield the matching row ids in ascending
- * order; the {@code count*} variants return only the number of matches; the
- * {@code sum*} variants return the sum of matching values as a {@code double};
- * and the {@code mean*} variants return their arithmetic mean.
+ * Query methods come in four flavours: those returning a {@link ResultIterator}
+ * identify the matching rows; the {@code count*} variants return only the
+ * number of matches; the {@code sum*} variants return the sum of matching
+ * values as a {@code double}; and the {@code mean*} variants return their
+ * arithmetic mean.
+ *
+ * <p>
+ * A {@link ResultIterator} is a {@link BlockIterator}, so any query result can
+ * be fed back into another query as a filter. For example
+ * {@code index.lessThanOrEqual(upper - 1, index.greaterThan(lower - 1))} is
+ * equivalent to {@code index.between(lower, upper)}. To read the matching row
+ * ids instead, call {@link ResultIterator#rowIds()}.
  */
 public class SliceZ {
 
@@ -45,6 +52,7 @@ public class SliceZ {
 			+ NUM_COUNTS * Integer.BYTES; // counts
 
 	static final int BLOCK_SIZE = 0x10000;
+	static final int BLOCK_SHIFT = Integer.numberOfTrailingZeros(BLOCK_SIZE); // 16
 	static final int BLOCK_WORDS = BLOCK_SIZE / Long.SIZE; // 16
 	static final int SPARSE_THRESHOLD = BLOCK_SIZE / Short.SIZE - 1;
 
@@ -392,10 +400,10 @@ public class SliceZ {
 	 *
 	 * @param value
 	 *            the exclusive upper bound
-	 * @return the matching row ids in ascending order
+	 * @return the matching rows, whose row ids are yielded in ascending order
 	 */
-	public PrimitiveIterator.OfInt lessThan(long value) {
-		return value == 0L ? IntStream.empty().iterator() : lessThanOrEqual(value - 1);
+	public ResultIterator lessThan(long value) {
+		return value == 0L ? ResultIterator.EMPTY : lessThanOrEqual(value - 1);
 	}
 
 	/**
@@ -437,9 +445,9 @@ public class SliceZ {
 	 *
 	 * @param value
 	 *            the inclusive upper bound
-	 * @return the matching row ids in ascending order
+	 * @return the matching rows, whose row ids are yielded in ascending order
 	 */
-	public PrimitiveIterator.OfInt lessThanOrEqual(long value) {
+	public ResultIterator lessThanOrEqual(long value) {
 		return lessThanOrEqual(value, new IterateAllBlocks(rowCount));
 	}
 
@@ -450,14 +458,14 @@ public class SliceZ {
 	 *            the inclusive upper bound
 	 * @param filter
 	 *            filters the input values
-	 * @return the matching row ids in ascending order
+	 * @return the matching rows, whose row ids are yielded in ascending order
 	 */
-	public PrimitiveIterator.OfInt lessThanOrEqual(long value, BlockIterator filter) {
+	public ResultIterator lessThanOrEqual(long value, BlockIterator filter) {
 		if (Long.compareUnsigned(value, min) < 0) {
-			return IntStream.empty().iterator();
+			return ResultIterator.EMPTY;
 		}
 		if (Long.compareUnsigned(value, max) > 0 && filter.isTrivial()) {
-			return IntStream.range(0, rowCount).iterator();
+			return new IterateAllBlocks(rowCount);
 		}
 		return new SingleBoundQuery(filter, value, true).iterator();
 	}
@@ -555,9 +563,9 @@ public class SliceZ {
 	 *
 	 * @param value
 	 *            the exclusive lower bound
-	 * @return the matching row ids in ascending order
+	 * @return the matching rows, whose row ids are yielded in ascending order
 	 */
-	public PrimitiveIterator.OfInt greaterThan(long value) {
+	public ResultIterator greaterThan(long value) {
 		return greaterThan(value, new IterateAllBlocks(rowCount));
 	}
 
@@ -568,14 +576,14 @@ public class SliceZ {
 	 *            the exclusive lower bound
 	 * @param filter
 	 *            filters the input values
-	 * @return the matching row ids in ascending order
+	 * @return the matching rows, whose row ids are yielded in ascending order
 	 */
-	public PrimitiveIterator.OfInt greaterThan(long value, BlockIterator filter) {
+	public ResultIterator greaterThan(long value, BlockIterator filter) {
 		if (Long.compareUnsigned(value, min) < 0 && filter.isTrivial()) {
-			return IntStream.range(0, rowCount).iterator();
+			return new IterateAllBlocks(rowCount);
 		}
 		if (Long.compareUnsigned(value, max) > 0) {
-			return IntStream.empty().iterator();
+			return ResultIterator.EMPTY;
 		}
 		return new SingleBoundQuery(filter, value, false).iterator();
 	}
@@ -674,10 +682,10 @@ public class SliceZ {
 	 *
 	 * @param value
 	 *            the inclusive lower bound
-	 * @return the matching row ids in ascending order
+	 * @return the matching rows, whose row ids are yielded in ascending order
 	 */
-	public PrimitiveIterator.OfInt greaterThanOrEqual(long value) {
-		return value == 0L ? IntStream.range(0, rowCount).iterator() : greaterThan(value - 1);
+	public ResultIterator greaterThanOrEqual(long value) {
+		return value == 0L ? new IterateAllBlocks(rowCount) : greaterThan(value - 1);
 	}
 
 	/**
@@ -721,9 +729,9 @@ public class SliceZ {
 	 *
 	 * @param value
 	 *            the value to match
-	 * @return the matching row ids in ascending order
+	 * @return the matching rows, whose row ids are yielded in ascending order
 	 */
-	public PrimitiveIterator.OfInt equal(long value) {
+	public ResultIterator equal(long value) {
 		return equal(value, new IterateAllBlocks(rowCount));
 	}
 
@@ -734,9 +742,9 @@ public class SliceZ {
 	 *            the value to match
 	 * @param filter
 	 *            filters the input values
-	 * @return the matching row ids in ascending order
+	 * @return the matching rows, whose row ids are yielded in ascending order
 	 */
-	public PrimitiveIterator.OfInt equal(long value, BlockIterator filter) {
+	public ResultIterator equal(long value, BlockIterator filter) {
 		return new EqualityQuery(filter, value, false).iterator();
 	}
 
@@ -745,9 +753,9 @@ public class SliceZ {
 	 *
 	 * @param value
 	 *            the value to exclude
-	 * @return the matching row ids in ascending order
+	 * @return the matching rows, whose row ids are yielded in ascending order
 	 */
-	public PrimitiveIterator.OfInt notEqual(long value) {
+	public ResultIterator notEqual(long value) {
 		return notEqual(value, new IterateAllBlocks(rowCount));
 	}
 
@@ -758,9 +766,9 @@ public class SliceZ {
 	 *            the value to exclude
 	 * @param filter
 	 *            filters the input values
-	 * @return the matching row ids in ascending order
+	 * @return the matching rows, whose row ids are yielded in ascending order
 	 */
-	public PrimitiveIterator.OfInt notEqual(long value, BlockIterator filter) {
+	public ResultIterator notEqual(long value, BlockIterator filter) {
 		return new EqualityQuery(filter, value, true).iterator();
 	}
 
@@ -771,10 +779,10 @@ public class SliceZ {
 	 * @param values
 	 *            the values to match; duplicates and ordering do not affect the
 	 *            result
-	 * @return the matching row ids in ascending order, empty if {@code values} is
-	 *         empty
+	 * @return the matching rows, whose row ids are yielded in ascending order,
+	 *         empty if {@code values} is empty
 	 */
-	public PrimitiveIterator.OfInt in(long... values) {
+	public ResultIterator in(long... values) {
 		return in(new IterateAllBlocks(rowCount), values);
 	}
 
@@ -787,12 +795,12 @@ public class SliceZ {
 	 * @param values
 	 *            the values to match; duplicates and ordering do not affect the
 	 *            result
-	 * @return the matching row ids in ascending order, empty if {@code values} is
-	 *         empty
+	 * @return the matching rows, whose row ids are yielded in ascending order,
+	 *         empty if {@code values} is empty
 	 */
-	public PrimitiveIterator.OfInt in(BlockIterator filter, long... values) {
+	public ResultIterator in(BlockIterator filter, long... values) {
 		if (values.length == 0) {
-			return IntStream.empty().iterator();
+			return ResultIterator.EMPTY;
 		}
 		if (values.length == 1) {
 			return equal(values[0], filter);
@@ -1036,10 +1044,11 @@ public class SliceZ {
 	 *            the inclusive lower bound
 	 * @param upper
 	 *            the exclusive upper bound
-	 * @return the matching row ids in ascending order, empty if {@code upper} is
-	 *         less than or equal to {@code lower} in unsigned order
+	 * @return the matching rows, whose row ids are yielded in ascending order,
+	 *         empty if {@code upper} is less than or equal to {@code lower} in
+	 *         unsigned order
 	 */
-	public PrimitiveIterator.OfInt between(long lower, long upper) {
+	public ResultIterator between(long lower, long upper) {
 		return between(lower, upper, new IterateAllBlocks(rowCount));
 	}
 
@@ -1054,19 +1063,20 @@ public class SliceZ {
 	 *            the exclusive upper bound
 	 * @param filter
 	 *            filters the input values
-	 * @return the matching row ids in ascending order, empty if {@code upper} is
-	 *         less than or equal to {@code lower} in unsigned order
+	 * @return the matching rows, whose row ids are yielded in ascending order,
+	 *         empty if {@code upper} is less than or equal to {@code lower} in
+	 *         unsigned order
 	 */
-	public PrimitiveIterator.OfInt between(long lower, long upper, BlockIterator filter) {
+	public ResultIterator between(long lower, long upper, BlockIterator filter) {
 		if (Long.compareUnsigned(upper, min) < 0 || Long.compareUnsigned(max, lower) < 0
 				|| Long.compareUnsigned(upper, lower) <= 0) {
-			return IntStream.empty().iterator();
+			return ResultIterator.EMPTY;
 		}
 		if (filter.isTrivial() && Long.compareUnsigned(lower, min) < 0 && Long.compareUnsigned(max, upper) < 0) {
-			return IntStream.range(0, rowCount).iterator();
+			return new IterateAllBlocks(rowCount);
 		}
 		if (lower == 0L) {
-			return upper == 0L ? IntStream.empty().iterator() : lessThanOrEqual(upper - 1, filter);
+			return upper == 0L ? ResultIterator.EMPTY : lessThanOrEqual(upper - 1, filter);
 		}
 		return new BetweenQuery(filter, lower - 1, upper - 1).iterator();
 	}
@@ -1279,16 +1289,17 @@ public class SliceZ {
 	 *
 	 * @param k
 	 *            the number of rows to select
-	 * @return the row ids of the bottom-{@code k} values, in ascending row-id order
+	 * @return the bottom-{@code k} rows, whose row ids are yielded in ascending
+	 *         order
 	 * @throws IllegalArgumentException
 	 *             if {@code k} is negative
 	 */
-	public PrimitiveIterator.OfInt bottom(int k) {
+	public ResultIterator bottom(int k) {
 		if (k < 0) {
 			throw new IllegalArgumentException("bottom-k negative k: " + k);
 		}
 		if (k == 0) {
-			return IntStream.empty().iterator();
+			return ResultIterator.EMPTY;
 		}
 		return new KTailRowsIdsQuery(k, true);
 	}
@@ -1390,16 +1401,16 @@ public class SliceZ {
 	 *
 	 * @param k
 	 *            the number of rows to select
-	 * @return the row ids of the top-{@code k} values, in ascending row-id order
+	 * @return the top-{@code k} rows, whose row ids are yielded in ascending order
 	 * @throws IllegalArgumentException
 	 *             if {@code k} is negative
 	 */
-	public PrimitiveIterator.OfInt top(int k) {
+	public ResultIterator top(int k) {
 		if (k < 0) {
 			throw new IllegalArgumentException("top-k negative k: " + k);
 		}
 		if (k == 0) {
-			return IntStream.empty().iterator();
+			return ResultIterator.EMPTY;
 		}
 		return new KTailRowsIdsQuery(k, false);
 	}
@@ -1714,11 +1725,15 @@ public class SliceZ {
 		}
 	}
 
-	protected class KTailRowsIdsQuery extends KTailQuery implements PrimitiveIterator.OfInt {
+	protected class KTailRowsIdsQuery extends KTailQuery implements ResultIterator {
 
 		private final Row[] rows;
 		private final int resultCount;
+		// materialised on demand by nextBlock, for use as a filter
+		private final Bits bits = new Bits();
 
+		// shared by both consumption modes: nextInt advances it by one row, nextBlock
+		// by a whole block's worth of rows
 		private int it;
 
 		private KTailRowsIdsQuery(int k, boolean bottom) {
@@ -1736,13 +1751,51 @@ public class SliceZ {
 		}
 
 		@Override
-		public int nextInt() {
-			return rows[it++].rid;
+		public PrimitiveIterator.OfInt rowIds() {
+			return new PrimitiveIterator.OfInt() {
+
+				@Override
+				public int nextInt() {
+					if (it >= resultCount) {
+						throw new NoSuchElementException();
+					}
+					return rows[it++].rid;
+				}
+
+				@Override
+				public boolean hasNext() {
+					return it < resultCount;
+				}
+			};
 		}
 
 		@Override
 		public boolean hasNext() {
 			return it < resultCount;
+		}
+
+		@Override
+		public int nextBlock() {
+			if (it >= resultCount) {
+				throw new NoSuchElementException();
+			}
+			// the rows are sorted by row id, so a block's rows form a contiguous run
+			int block = rows[it].rid >>> BLOCK_SHIFT;
+			int base = block << BLOCK_SHIFT;
+			bits.reset();
+			while (it < resultCount && (rows[it].rid >>> BLOCK_SHIFT) == block) {
+				int position = rows[it].rid - base;
+				bits.bits[position >>> 6] |= 1L << position;
+				it++;
+			}
+			bits.setEmpty(false);
+			bits.setFull(false);
+			return block;
+		}
+
+		@Override
+		public Bits getBits() {
+			return bits;
 		}
 	}
 
@@ -1796,60 +1849,116 @@ public class SliceZ {
 		}
 	}
 
-	private static class OutputIterator implements PrimitiveIterator.OfInt {
+	/**
+	 * Drives a {@link BaseQuery} block by block, exposing the matching rows either
+	 * as row ids or as blocks of bits so the result can filter another query.
+	 *
+	 * <p>
+	 * Evaluation is lazy: the next matching block is staged on demand by
+	 * {@link #stage()}, which evaluates blocks (skipping over any the query's own
+	 * filter passed by) until one with at least one matching row is found. Both
+	 * {@link #nextInt()} and {@link #nextBlock()} consume staged blocks, which is
+	 * why the two modes must not be mixed.
+	 */
+	private static class OutputIterator implements ResultIterator {
 		private final BaseQuery query;
-		private final char[] output;
-		private final int rowCount;
-		private int prefix;
-		private int base;
-		private int it;
-		private int outputLimit;
 		// index of the physical block currently sitting at the query's read position
 		private int block;
+		// a block with matching rows has been evaluated into the query's buffer but
+		// has not been handed to the caller yet
+		private boolean staged;
+		private int stagedBlock;
+		private int stagedRange;
 
-		private OutputIterator(BaseQuery query, int rowCount, char[] output) {
+		private OutputIterator(BaseQuery query) {
 			this.query = query;
-			this.output = output;
-			this.rowCount = rowCount;
-		}
-
-		@Override
-		public int nextInt() {
-			return prefix + output[it++];
 		}
 
 		@Override
 		public boolean hasNext() {
-			if (it == outputLimit) {
-				while (base < rowCount && !nextBatch());
-			}
-			return base < rowCount || it < outputLimit;
+			return staged || stage();
 		}
 
-		private boolean nextBatch() {
+		@Override
+		public int nextBlock() {
+			if (!staged && !stage()) {
+				throw new NoSuchElementException();
+			}
+			staged = false;
+			return stagedBlock;
+		}
+
+		@Override
+		public Bits getBits() {
+			return query.buffer;
+		}
+
+		@Override
+		public PrimitiveIterator.OfInt rowIds() {
+			return new RowIds();
+		}
+
+		/**
+		 * Materialises the staged blocks into row ids, one block at a time. The output
+		 * buffer is allocated here rather than by the enclosing result so that a result
+		 * used only as a filter never pays for it.
+		 */
+		private final class RowIds implements PrimitiveIterator.OfInt {
+
+			private final char[] output = new char[query.buffer.capacity()];
+			private int prefix;
+			private int it;
+			private int outputLimit;
+
+			@Override
+			public int nextInt() {
+				if (it == outputLimit) {
+					if (!staged && !stage()) {
+						throw new NoSuchElementException();
+					}
+					prefix = stagedBlock * BLOCK_SIZE;
+					outputLimit = query.extractBits(output, stagedRange);
+					staged = false;
+					it = 0;
+				}
+				return prefix + output[it++];
+			}
+
+			@Override
+			public boolean hasNext() {
+				return it < outputLimit || staged || stage();
+			}
+		}
+
+		/**
+		 * Evaluates blocks until one with at least one matching row is found, leaving
+		 * the result in the query's buffer.
+		 *
+		 * @return {@code true} if such a block was staged
+		 */
+		private boolean stage() {
 			BlockIterator blocks = query.blockIterator;
-			if (!blocks.hasNext()) {
-				// no further blocks are of interest: stop the driving loop in hasNext
-				base = rowCount;
-				return false;
-			}
-			// the iterator names the next block to evaluate; skip the stored data of any
-			// blocks it passed over so the query's read position lands on that block
-			int target = blocks.nextBlock();
-			while (block < target) {
-				query.skipBlock();
+			while (blocks.hasNext()) {
+				// the iterator names the next block to evaluate; skip the stored data of any
+				// blocks it passed over so the query's read position lands on that block
+				int target = blocks.nextBlock();
+				while (block < target) {
+					query.skipBlock();
+					block++;
+				}
+				query.base = target * BLOCK_SIZE;
+				int range = query.range();
+				query.evaluateBlock();
+				query.buffer.and(blocks.getBits());
 				block++;
+				if (query.buffer.count(range) > 0) {
+					stagedBlock = target;
+					stagedRange = range;
+					staged = true;
+					return true;
+				}
 			}
-			prefix = block * BLOCK_SIZE;
-			base = prefix;
-			query.evaluateBlock();
-			query.buffer.and(blocks.getBits());
-			int range = Math.min(rowCount - base, output.length);
-			outputLimit = query.extractBits(output, range);
-			base += range;
-			block++;
-			it = 0;
-			return outputLimit > 0;
+			return false;
 		}
 	}
 
@@ -1863,8 +1972,8 @@ public class SliceZ {
 			this.blockIterator = blockIterator;
 		}
 
-		public PrimitiveIterator.OfInt iterator() {
-			return new OutputIterator(this, rowCount, new char[buffer.capacity()]);
+		public ResultIterator iterator() {
+			return new OutputIterator(this);
 		}
 
 		int extractBits(char[] output, int range) {
@@ -2655,15 +2764,20 @@ public class SliceZ {
 		return -1;
 	}
 
-	private static final class IterateAllBlocks implements BlockIterator {
+	/**
+	 * The identity filter, which keeps every row, and equally the result of a query
+	 * every row satisfies. A single cursor over the row ids serves both modes:
+	 * {@link #nextInt()} advances it by one row, {@link #nextBlock()} by a whole
+	 * block.
+	 */
+	private static final class IterateAllBlocks implements ResultIterator {
 
-		private final int maxBlock;
+		private final int maxRows;
 		private final Bits bits = Bits.FULL;
-		private int blockIndex = 0;
+		private int rid = 0;
 
 		public IterateAllBlocks(int maxRows) {
-			// round up: a partial final block still has to be visited
-			this.maxBlock = (maxRows + BLOCK_SIZE - 1) >>> Integer.bitCount(BLOCK_SIZE - 1);
+			this.maxRows = maxRows;
 		}
 
 		@Override
@@ -2673,12 +2787,37 @@ public class SliceZ {
 
 		@Override
 		public int nextBlock() {
-			return blockIndex++;
+			if (rid >= maxRows) {
+				throw new NoSuchElementException();
+			}
+			int block = rid >>> BLOCK_SHIFT;
+			// a partial final block still has to be visited in full
+			rid = (int) Math.min(maxRows, ((long) block + 1) << BLOCK_SHIFT);
+			return block;
+		}
+
+		@Override
+		public PrimitiveIterator.OfInt rowIds() {
+			return new PrimitiveIterator.OfInt() {
+
+				@Override
+				public int nextInt() {
+					if (rid >= maxRows) {
+						throw new NoSuchElementException();
+					}
+					return rid++;
+				}
+
+				@Override
+				public boolean hasNext() {
+					return rid < maxRows;
+				}
+			};
 		}
 
 		@Override
 		public boolean hasNext() {
-			return blockIndex < maxBlock;
+			return rid < maxRows;
 		}
 
 		@Override

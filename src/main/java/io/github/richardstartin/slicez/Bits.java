@@ -8,6 +8,8 @@ import static io.github.richardstartin.slicez.SliceZ.BLOCK_WORDS;
 class Bits {
 
 	public static final Bits FULL = new Bits(0, true);
+	/** An immutable empty block, exposed by results which match nothing. */
+	public static final Bits EMPTY = new Bits();
 
 	final long[] bits;
 	private boolean empty = true;

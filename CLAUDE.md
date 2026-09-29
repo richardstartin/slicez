@@ -74,7 +74,9 @@ This conflates all-zero slices with all-one slices (both become `FULL`), reducin
 
 ### Query evaluation
 
-All queries extend `BaseQuery implements PrimitiveIterator.OfInt`. They iterate block by block, calling `evaluateBlock()` which fills a `Bits` working buffer, then `extractBits()` materializes matching row IDs into an `int[]` output batch.
+All queries extend `BaseQuery`, whose `iterator()` returns a `ResultIterator` (an `OutputIterator`). They iterate block by block, calling `evaluateBlock()` which fills a `Bits` working buffer, then `extractBits()` materializes matching row IDs into an `int[]` output batch.
+
+`ResultIterator extends BlockIterator` is the return type of every row-matching query method, so a result can be handed to another query as a filter (`lessThanOrEqual(upper - 1, greaterThan(lower - 1))` == `between(lower, upper)`). `ResultIterator.rowIds()` converts it to a `PrimitiveIterator.OfInt` over the matching row ids; it deliberately does not extend `PrimitiveIterator.OfInt`, so the `char[BLOCK_SIZE]` materialization buffer is allocated by `rowIds()` and a result used only as a filter never allocates one. A `ResultIterator` is single-pass and must be consumed in one mode or the other — the `rowIds()` view shares the cursor `nextBlock()` advances. The degenerate results are `ResultIterator.EMPTY` and `IterateAllBlocks`, which doubles as the trivial (identity) filter.
 
 The `Bits` helper class wraps a `long[BLOCK_WORDS]` bitmap and tracks `empty`/`full` flags to short-circuit bitwise operations. It provides `denseOr`, `denseAnd`, `denseAndNot`, `sparseOr`, `sparseAnd`, `sparseAndNot`, `sparseOrNot` operations that advance the `ByteBuffer` read position as a side effect.
 

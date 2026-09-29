@@ -96,7 +96,7 @@ public class EqualityQueryBenchmark {
 
 	@Benchmark
 	public void SliceZEqual(SliceZState s, Blackhole bh) {
-		PrimitiveIterator.OfInt it = s.index.equal(s.value);
+		PrimitiveIterator.OfInt it = s.index.equal(s.value).rowIds();
 		while (it.hasNext())
 			bh.consume(it.nextInt());
 	}
