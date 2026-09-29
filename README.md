@@ -14,7 +14,7 @@ Gradle (`build.gradle`):
 
 ```groovy
 dependencies {
-    implementation 'io.github.richardstartin:slicez:0.2.0'
+    implementation 'io.github.richardstartin:slicez:0.7.0'
 }
 ```
 
@@ -24,7 +24,7 @@ Maven (`pom.xml`):
 <dependency>
     <groupId>io.github.richardstartin</groupId>
     <artifactId>slicez</artifactId>
-    <version>0.2.0</version>
+    <version>0.7.0</version>
 </dependency>
 ```
 
